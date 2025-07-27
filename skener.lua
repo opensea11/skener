@@ -1,432 +1,501 @@
---[[
-🔍 IMPROVED REMOTEEVENT SCANNER TOOL v2.0
-Enhanced version with better error handling and compatibility
-Educational Purpose - Game Security Analysis
-]]
-
 local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
+local CoreGui = game:GetService("CoreGui")
 local UserInputService = game:GetService("UserInputService")
-local HttpService = game:GetService("HttpService")
-local TweenService = game:GetService("TweenService")
-
--- Try CoreGui first, fallback to PlayerGui
-local GuiParent = game:GetService("CoreGui")
-pcall(function()
-    local test = Instance.new("ScreenGui")
-    test.Parent = GuiParent
-    test:Destroy()
-end) or (GuiParent = Players.LocalPlayer:WaitForChild("PlayerGui"))
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Player = Players.LocalPlayer
+local PlayerGui = Player:WaitForChild("PlayerGui")
 
--- Enhanced scanner data storage
-local ScannerData = {
-    foundRemotes = {},
-    hookedRemotes = {},
-    networkLogs = {},
-    suspiciousEvents = {},
-    originalFunctions = {},
-    isScanning = false,
-    isLogging = false,
-    scanDepth = 0,
-    maxLogs = 1000
+-- Scanner Results Storage
+local ScanResults = {
+    RemoteEvents = {},
+    RemoteFunctions = {},
+    LocalScripts = {},
+    Values = {},
+    GUIs = {},
+    Bindables = {},
+    TouchParts = {},
+    ProximityPrompts = {},
+    Suspicious = {}
 }
 
--- Expanded suspicious patterns with scoring
-local SUSPICIOUS_PATTERNS = {
-    -- High priority (Score: 5)
-    {patterns = {"money", "cash", "coins", "currency", "balance", "wallet"}, score = 5},
-    {patterns = {"give", "add", "remove", "set", "change"}, score = 5},
-    {patterns = {"admin", "owner", "dev", "mod", "staff"}, score = 5},
-    
-    -- Medium priority (Score: 3)
-    {patterns = {"buy", "sell", "purchase", "trade", "shop", "store"}, score = 3},
-    {patterns = {"item", "tools", "gear", "weapon", "upgrade"}, score = 3},
-    {patterns = {"teleport", "tp", "fly", "speed", "jump"}, score = 3},
-    
-    -- Low priority (Score: 1)
-    {patterns = {"reward", "bonus", "gift", "prize", "earn"}, score = 1},
-    {patterns = {"level", "exp", "xp", "rank", "points"}, score = 1}
+-- Money/Currency Keywords
+local MoneyKeywords = {
+    "money", "cash", "coin", "currency", "dollar", "credit", "point", "score", 
+    "gold", "silver", "gem", "diamond", "robux", "buck", "wallet", "bank",
+    "balance", "fund", "wealth", "rich", "pay", "earn", "reward", "prize"
 }
 
--- GUI Variables
-local ScannerGUI = nil
-local MainFrame = nil
-local LogFrame = nil
-local RemoteList = nil
-local NetworkLog = nil
-local StatusLabel = nil
+-- Stats Keywords  
+local StatsKeywords = {
+    "health", "hp", "level", "exp", "xp", "experience", "stat", "strength",
+    "defense", "speed", "mana", "energy", "stamina", "power", "damage",
+    "armor", "shield", "life", "lives", "kill", "death", "win", "lose"
+}
 
--- Enhanced utility functions
-local function safeCall(func, ...)
-    local success, result = pcall(func, ...)
-    if not success then
-        warn("Scanner Error: " .. tostring(result))
-    end
-    return success, result
-end
+-- Main Scanner UI
+local ScannerUI
+local MainFrame
+local ResultsFrame
+local LogFrame
 
-local function timestampLog()
-    return "[" .. os.date("%H:%M:%S") .. "] "
-end
-
-local function formatArgs(args)
-    local formatted = {}
-    for i, arg in pairs(args) do
-        if type(arg) == "table" then
-            local success, json = pcall(HttpService.JSONEncode, HttpService, arg)
-            if success then
-                table.insert(formatted, json)
-            else
-                table.insert(formatted, "Table[" .. #arg .. "]")
-            end
-        elseif type(arg) == "userdata" then
-            table.insert(formatted, tostring(arg))
-        else
-            table.insert(formatted, tostring(arg))
+-- Utility Functions
+local function containsKeyword(text, keywords)
+    text = string.lower(tostring(text))
+    for _, keyword in ipairs(keywords) do
+        if string.find(text, keyword) then
+            return true, keyword
         end
     end
-    return table.concat(formatted, ", ")
+    return false
 end
 
-local function updateStatus(message, color)
-    if StatusLabel then
-        StatusLabel.Text = "Status: " .. message
-        StatusLabel.TextColor3 = color or Color3.new(1, 1, 1)
-    end
+local function logResult(category, name, path, info)
+    table.insert(ScanResults[category], {
+        Name = name,
+        Path = path,
+        Info = info,
+        Object = game:FindFirstChild(path, true)
+    })
 end
 
-local function logMessage(message, color, priority)
-    print(timestampLog() .. message)
-    
-    if NetworkLog then
-        -- Manage log count
-        local children = NetworkLog:GetChildren()
-        if #children >= ScannerData.maxLogs then
-            children[1]:Destroy()
-        end
+local function addLogEntry(text, color)
+    if LogFrame and LogFrame:FindFirstChild("ScrollingFrame") then
+        local entry = Instance.new("TextLabel")
+        entry.Size = UDim2.new(1, -10, 0, 20)
+        entry.BackgroundTransparency = 1
+        entry.Text = text
+        entry.TextColor3 = color or Color3.new(1, 1, 1)
+        entry.Font = Enum.Font.SourceCodePro
+        entry.TextSize = 11
+        entry.TextXAlignment = Enum.TextXAlignment.Left
+        entry.Parent = LogFrame.ScrollingFrame
         
-        local logEntry = Instance.new("TextLabel")
-        logEntry.Size = UDim2.new(1, -10, 0, 20)
-        logEntry.BackgroundTransparency = 1
-        logEntry.Text = timestampLog() .. message
-        logEntry.TextColor3 = color or Color3.new(1, 1, 1)
-        logEntry.TextSize = 12
-        logEntry.Font = Enum.Font.RobotoMono
-        logEntry.TextXAlignment = Enum.TextXAlignment.Left
-        logEntry.Parent = NetworkLog
-        
-        -- Priority highlighting
-        if priority and priority >= 3 then
-            logEntry.BackgroundTransparency = 0.8
-            logEntry.BackgroundColor3 = Color3.fromRGB(100, 0, 0)
-        end
-        
-        -- Auto scroll with animation
-        spawn(function()
-            wait(0.1)
-            NetworkLog.CanvasSize = UDim2.new(0, 0, 0, #NetworkLog:GetChildren() * 20)
-            local targetPosition = Vector2.new(0, math.max(0, NetworkLog.CanvasSize.Y.Offset - NetworkLog.AbsoluteSize.Y))
-            
-            local tween = TweenService:Create(NetworkLog, 
-                TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                {CanvasPosition = targetPosition}
-            )
-            tween:Play()
-        end)
+        -- Auto-scroll
+        LogFrame.ScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, #LogFrame.ScrollingFrame:GetChildren() * 20)
+        LogFrame.ScrollingFrame.CanvasPosition = Vector2.new(0, LogFrame.ScrollingFrame.CanvasSize.Y.Offset)
     end
 end
 
--- Enhanced analysis functions
-local function analyzeRemoteName(remoteName)
-    local name = remoteName:lower()
-    local totalScore = 0
-    local matchedPatterns = {}
-    
-    for _, patternGroup in pairs(SUSPICIOUS_PATTERNS) do
-        for _, pattern in pairs(patternGroup.patterns) do
-            if name:find(pattern) then
-                totalScore = totalScore + patternGroup.score
-                table.insert(matchedPatterns, pattern .. "(" .. patternGroup.score .. ")")
-            end
-        end
-    end
-    
-    -- Additional heuristics
-    if name:match("%d+$") then -- Ends with numbers
-        totalScore = totalScore + 1
-        table.insert(matchedPatterns, "numbered")
-    end
-    
-    if #name <= 3 then -- Very short names
-        totalScore = totalScore + 2
-        table.insert(matchedPatterns, "short")
-    end
-    
-    if name:find("_") or name:find("-") then -- Contains separators
-        totalScore = totalScore + 1
-        table.insert(matchedPatterns, "formatted")
-    end
-    
-    return totalScore, matchedPatterns
-end
-
-local function deepScanFolder(folder, path, depth)
-    if depth > 10 then return end -- Prevent infinite recursion
-    
-    safeCall(function()
-        for _, child in pairs(folder:GetChildren()) do
-            if child:IsA("RemoteEvent") then
-                local fullPath = path .. child.Name
-                local suspiciousScore, patterns = analyzeRemoteName(child.Name)
-                
-                local remoteData = {
-                    name = child.Name,
-                    path = fullPath,
-                    object = child,
-                    suspicious = suspiciousScore > 0,
-                    patterns = patterns,
-                    score = suspiciousScore,
-                    timestamp = tick()
-                }
-                
-                table.insert(ScannerData.foundRemotes, remoteData)
-                
-                if suspiciousScore > 0 then
-                    table.insert(ScannerData.suspiciousEvents, remoteData)
-                    local priority = suspiciousScore >= 5 and 5 or (suspiciousScore >= 3 and 3 or 1)
-                    logMessage("🚨 SUSPICIOUS: " .. fullPath .. " (Score: " .. suspiciousScore .. ")", 
-                        Color3.fromRGB(255, 100, 100), priority)
-                    logMessage("   Patterns: " .. table.concat(patterns, ", "), 
-                        Color3.fromRGB(255, 200, 100), priority)
-                else
-                    logMessage("📡 Found: " .. fullPath, Color3.fromRGB(100, 255, 100))
-                end
-                
-            elseif child:IsA("Folder") or child:IsA("Configuration") or 
-                   child:IsA("ModuleScript") or child:IsA("LocalScript") then
-                deepScanFolder(child, path .. child.Name .. "/", depth + 1)
-            end
-        end
-    end)
-end
-
+-- Core Scanner Functions
 local function scanRemoteEvents()
-    ScannerData.foundRemotes = {}
-    ScannerData.suspiciousEvents = {}
-    ScannerData.isScanning = true
+    addLogEntry("🔍 Scanning Remote Events...", Color3.fromRGB(100, 200, 255))
+    local count = 0
     
-    updateStatus("Scanning for RemoteEvents...", Color3.fromRGB(255, 255, 0))
-    logMessage("🔍 Starting enhanced RemoteEvent scan...", Color3.fromRGB(0, 255, 255))
-    
-    -- Expanded scan locations
-    local locations = {
-        {ReplicatedStorage, "ReplicatedStorage/"},
-        {game.ReplicatedFirst, "ReplicatedFirst/"},
-        {game.Lighting, "Lighting/"},
-        {game.StarterPlayer, "StarterPlayer/"},
-        {game.StarterPack, "StarterPack/"},
-        {game.StarterGui, "StarterGui/"},
-        {game.SoundService, "SoundService/"},
-        {game.Workspace, "Workspace/"}
-    }
-    
-    -- Player-specific locations
-    for _, player in pairs(Players:GetPlayers()) do
-        if player.Character then
-            table.insert(locations, {player.Character, "Players/" .. player.Name .. "/Character/"})
-        end
-        if player:FindFirstChild("PlayerGui") then
-            table.insert(locations, {player.PlayerGui, "Players/" .. player.Name .. "/PlayerGui/"})
-        end
-        if player:FindFirstChild("Backpack") then
-            table.insert(locations, {player.Backpack, "Players/" .. player.Name .. "/Backpack/"})
+    for _, obj in pairs(game:GetDescendants()) do
+        if obj:IsA("RemoteEvent") then
+            local isMoney, keyword = containsKeyword(obj.Name, MoneyKeywords)
+            local isStats, statKeyword = containsKeyword(obj.Name, StatsKeywords)
+            
+            local info = "RemoteEvent"
+            if isMoney then info = info .. " [💰 MONEY: " .. keyword .. "]" end
+            if isStats then info = info .. " [📊 STATS: " .. statKeyword .. "]" end
+            
+            logResult("RemoteEvents", obj.Name, obj:GetFullName(), info)
+            addLogEntry("  📡 " .. obj.Name .. " - " .. info, isMoney and Color3.fromRGB(255, 215, 0) or Color3.fromRGB(150, 150, 150))
+            count = count + 1
         end
     end
     
-    local totalFound = 0
-    for _, location in pairs(locations) do
-        if location[1] then
-            logMessage("📂 Scanning: " .. location[2], Color3.fromRGB(200, 200, 255))
-            safeCall(deepScanFolder, location[1], location[2], 0)
-            wait(0.1) -- Prevent lag
-        end
-    end
-    
-    ScannerData.isScanning = false
-    totalFound = #ScannerData.foundRemotes
-    
-    updateStatus("Scan complete! Found " .. totalFound .. " RemoteEvents", Color3.fromRGB(0, 255, 0))
-    logMessage("✅ Enhanced scan complete! Found " .. totalFound .. " RemoteEvents", Color3.fromRGB(0, 255, 0))
-    logMessage("⚠️ Suspicious events: " .. #ScannerData.suspiciousEvents, Color3.fromRGB(255, 255, 0))
-    logMessage("🎯 High priority threats: " .. 
-        #table.filter(ScannerData.suspiciousEvents, function(event) return event.score >= 5 end),
-        Color3.fromRGB(255, 0, 0))
-    
-    updateRemoteList()
+    addLogEntry("✅ Found " .. count .. " Remote Events", Color3.fromRGB(0, 255, 100))
 end
 
--- Enhanced hooking with better error handling
-local function createAdvancedHook(remoteData)
-    if ScannerData.hookedRemotes[remoteData.name] then
-        return false -- Already hooked
+local function scanRemoteFunctions()
+    addLogEntry("🔍 Scanning Remote Functions...", Color3.fromRGB(100, 200, 255))
+    local count = 0
+    
+    for _, obj in pairs(game:GetDescendants()) do
+        if obj:IsA("RemoteFunction") then
+            local isMoney, keyword = containsKeyword(obj.Name, MoneyKeywords)
+            local isStats, statKeyword = containsKeyword(obj.Name, StatsKeywords)
+            
+            local info = "RemoteFunction"
+            if isMoney then info = info .. " [💰 MONEY: " .. keyword .. "]" end
+            if isStats then info = info .. " [📊 STATS: " .. statKeyword .. "]" end
+            
+            logResult("RemoteFunctions", obj.Name, obj:GetFullName(), info)
+            addLogEntry("  🔧 " .. obj.Name .. " - " .. info, isMoney and Color3.fromRGB(255, 215, 0) or Color3.fromRGB(150, 150, 150))
+            count = count + 1
+        end
     end
     
-    local remote = remoteData.object
-    if not remote or not remote.Parent then
-        logMessage("❌ Cannot hook - RemoteEvent no longer exists: " .. remoteData.name, Color3.fromRGB(255, 0, 0))
-        return false
+    addLogEntry("✅ Found " .. count .. " Remote Functions", Color3.fromRGB(0, 255, 100))
+end
+
+local function scanValues()
+    addLogEntry("🔍 Scanning Values (Money/Stats)...", Color3.fromRGB(100, 200, 255))
+    local count = 0
+    
+    for _, obj in pairs(game:GetDescendants()) do
+        if obj:IsA("IntValue") or obj:IsA("NumberValue") or obj:IsA("StringValue") then
+            local isMoney, keyword = containsKeyword(obj.Name, MoneyKeywords)
+            local isStats, statKeyword = containsKeyword(obj.Name, StatsKeywords)
+            
+            if isMoney or isStats then
+                local info = obj.ClassName .. " = " .. tostring(obj.Value)
+                if isMoney then info = info .. " [💰 MONEY: " .. keyword .. "]" end
+                if isStats then info = info .. " [📊 STATS: " .. statKeyword .. "]" end
+                
+                logResult("Values", obj.Name, obj:GetFullName(), info)
+                addLogEntry("  💎 " .. obj.Name .. " = " .. tostring(obj.Value) .. " - " .. info, 
+                    isMoney and Color3.fromRGB(255, 215, 0) or Color3.fromRGB(100, 255, 100))
+                count = count + 1
+            end
+        end
     end
     
-    local success, originalFunction = safeCall(function()
-        return remote.FireServer
+    addLogEntry("✅ Found " .. count .. " Valuable Values", Color3.fromRGB(0, 255, 100))
+end
+
+local function scanGUIs()
+    addLogEntry("🔍 Scanning GUI Elements...", Color3.fromRGB(100, 200, 255))
+    local count = 0
+    
+    for _, obj in pairs(PlayerGui:GetDescendants()) do
+        if obj:IsA("TextButton") or obj:IsA("ImageButton") then
+            local isMoney, keyword = containsKeyword(obj.Name, MoneyKeywords)
+            local isStats, statKeyword = containsKeyword(obj.Name, StatsKeywords)
+            
+            if isMoney or isStats then
+                local info = obj.ClassName .. " [Clickable]"
+                if isMoney then info = info .. " [💰 MONEY: " .. keyword .. "]" end
+                if isStats then info = info .. " [📊 STATS: " .. statKeyword .. "]" end
+                
+                logResult("GUIs", obj.Name, obj:GetFullName(), info)
+                addLogEntry("  🖱️ " .. obj.Name .. " - " .. info, Color3.fromRGB(255, 150, 50))
+                count = count + 1
+            end
+        end
+        
+        if obj:IsA("TextLabel") then
+            local text = obj.Text
+            local isMoney, keyword = containsKeyword(text, MoneyKeywords)
+            local isStats, statKeyword = containsKeyword(text, StatsKeywords)
+            
+            if isMoney or isStats then
+                local info = "TextLabel: '" .. text .. "'"
+                if isMoney then info = info .. " [💰 MONEY: " .. keyword .. "]" end
+                if isStats then info = info .. " [📊 STATS: " .. statKeyword .. "]" end
+                
+                logResult("GUIs", obj.Name, obj:GetFullName(), info)
+                addLogEntry("  📝 " .. obj.Name .. " - " .. info, Color3.fromRGB(200, 200, 100))
+                count = count + 1
+            end
+        end
+    end
+    
+    addLogEntry("✅ Found " .. count .. " GUI Elements", Color3.fromRGB(0, 255, 100))
+end
+
+local function scanProximityPrompts()
+    addLogEntry("🔍 Scanning Proximity Prompts...", Color3.fromRGB(100, 200, 255))
+    local count = 0
+    
+    for _, obj in pairs(workspace:GetDescendants()) do
+        if obj:IsA("ProximityPrompt") then
+            local isMoney, keyword = containsKeyword(obj.ObjectText, MoneyKeywords)
+            local isStats, statKeyword = containsKeyword(obj.ObjectText, StatsKeywords)
+            
+            local info = "ProximityPrompt: '" .. obj.ObjectText .. "'"
+            if isMoney then info = info .. " [💰 MONEY: " .. keyword .. "]" end
+            if isStats then info = info .. " [📊 STATS: " .. statKeyword .. "]" end
+            
+            logResult("ProximityPrompts", obj.ObjectText, obj:GetFullName(), info)
+            addLogResult("  🚪 " .. obj.ObjectText .. " - " .. info, isMoney and Color3.fromRGB(255, 215, 0) or Color3.fromRGB(150, 255, 150))
+            count = count + 1
+        end
+    end
+    
+    addLogEntry("✅ Found " .. count .. " Proximity Prompts", Color3.fromRGB(0, 255, 100))
+end
+
+local function scanTouchParts()
+    addLogEntry("🔍 Scanning Touch-Enabled Parts...", Color3.fromRGB(100, 200, 255))
+    local count = 0
+    
+    for _, obj in pairs(workspace:GetDescendants()) do
+        if obj:IsA("BasePart") and obj.Touched then
+            local isMoney, keyword = containsKeyword(obj.Name, MoneyKeywords)
+            local isStats, statKeyword = containsKeyword(obj.Name, StatsKeywords)
+            
+            if isMoney or isStats then
+                local info = "TouchPart"
+                if isMoney then info = info .. " [💰 MONEY: " .. keyword .. "]" end
+                if isStats then info = info .. " [📊 STATS: " .. statKeyword .. "]" end
+                
+                logResult("TouchParts", obj.Name, obj:GetFullName(), info)
+                addLogEntry("  👆 " .. obj.Name .. " - " .. info, Color3.fromRGB(255, 100, 255))
+                count = count + 1
+            end
+        end
+    end
+    
+    addLogEntry("✅ Found " .. count .. " Touch Parts", Color3.fromRGB(0, 255, 100))
+end
+
+-- Auto-Exploit Functions
+local function autoTouchParts()
+    addLogEntry("🤖 Auto-touching money parts...", Color3.fromRGB(255, 150, 0))
+    
+    for _, result in ipairs(ScanResults.TouchParts) do
+        if result.Object and result.Object.Parent then
+            pcall(function()
+                result.Object:Touch(Player.Character.HumanoidRootPart)
+            end)
+        end
+    end
+end
+
+local function autoClickButtons()
+    addLogEntry("🤖 Auto-clicking money buttons...", Color3.fromRGB(255, 150, 0))
+    
+    for _, result in ipairs(ScanResults.GUIs) do
+        if result.Object and result.Object.Parent and (result.Object:IsA("TextButton") or result.Object:IsA("ImageButton")) then
+            pcall(function()
+                result.Object.MouseButton1Click:Fire()
+            end)
+        end
+    end
+end
+
+local function fireRemoteEvents()
+    addLogEntry("🤖 Firing money remote events...", Color3.fromRGB(255, 150, 0))
+    
+    for _, result in ipairs(ScanResults.RemoteEvents) do
+        if result.Object and result.Object.Parent and string.find(string.lower(result.Info), "money") then
+            pcall(function()
+                result.Object:FireServer()
+                -- Try common parameters
+                result.Object:FireServer(999999)
+                result.Object:FireServer("add", 999999)
+                result.Object:FireServer(Player, 999999)
+            end)
+        end
+    end
+end
+
+-- GUI Builder
+local function buildScannerGUI()
+    if ScannerUI then ScannerUI:Destroy() end
+    
+    ScannerUI = Instance.new("ScreenGui")
+    ScannerUI.Name = "UniversalScanner"
+    ScannerUI.Parent = CoreGui
+    ScannerUI.ResetOnSpawn = false
+    
+    -- Main Frame
+    MainFrame = Instance.new("Frame")
+    MainFrame.Size = UDim2.new(0, 600, 0, 450)
+    MainFrame.Position = UDim2.new(0.5, -300, 0.5, -225)
+    MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    MainFrame.BackgroundTransparency = 0.05
+    MainFrame.BorderSizePixel = 0
+    MainFrame.Parent = ScannerUI
+    
+    local mainCorner = Instance.new("UICorner")
+    mainCorner.CornerRadius = UDim.new(0, 10)
+    mainCorner.Parent = MainFrame
+    
+    -- Title Bar
+    local titleBar = Instance.new("Frame")
+    titleBar.Size = UDim2.new(1, 0, 0, 40)
+    titleBar.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    titleBar.BorderSizePixel = 0
+    titleBar.Parent = MainFrame
+    
+    local titleCorner = Instance.new("UICorner")
+    titleCorner.CornerRadius = UDim.new(0, 10)
+    titleCorner.Parent = titleBar
+    
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, -100, 1, 0)
+    title.BackgroundTransparency = 1
+    title.Text = "🔍 Universal Game Scanner & Exploit Tool"
+    title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 16
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.Position = UDim2.new(0, 15, 0, 0)
+    title.Parent = titleBar
+    
+    -- Close Button
+    local closeBtn = Instance.new("TextButton")
+    closeBtn.Size = UDim2.new(0, 30, 0, 30)
+    closeBtn.Position = UDim2.new(1, -35, 0, 5)
+    closeBtn.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+    closeBtn.Text = "✕"
+    closeBtn.TextColor3 = Color3.new(1, 1, 1)
+    closeBtn.Font = Enum.Font.GothamBold
+    closeBtn.TextSize = 14
+    closeBtn.BorderSizePixel = 0
+    closeBtn.Parent = titleBar
+    
+    local closeBtnCorner = Instance.new("UICorner")
+    closeBtnCorner.CornerRadius = UDim.new(0, 5)
+    closeBtnCorner.Parent = closeBtn
+    
+    closeBtn.MouseButton1Click:Connect(function()
+        ScannerUI:Destroy()
     end)
     
-    if not success then
-        logMessage("❌ Cannot access FireServer for: " .. remoteData.name, Color3.fromRGB(255, 0, 0))
-        return false
-    end
+    -- Control Panel
+    local controlPanel = Instance.new("Frame")
+    controlPanel.Size = UDim2.new(1, -20, 0, 100)
+    controlPanel.Position = UDim2.new(0, 10, 0, 50)
+    controlPanel.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+    controlPanel.BorderSizePixel = 0
+    controlPanel.Parent = MainFrame
     
-    -- Store original function
-    ScannerData.originalFunctions[remoteData.name] = originalFunction
+    local controlCorner = Instance.new("UICorner")
+    controlCorner.CornerRadius = UDim.new(0, 8)
+    controlCorner.Parent = controlPanel
     
-    -- Create enhanced hook
-    safeCall(function()
-        remote.FireServer = function(self, ...)
-            local args = {...}
-            local timestamp = tick()
-            
-            -- Log the call
-            local argsString = formatArgs(args)
-            local logColor = remoteData.suspicious and Color3.fromRGB(255, 100, 100) or Color3.fromRGB(100, 255, 255)
-            local priority = remoteData.score or 1
-            
-            logMessage("🔥 FIRED: " .. remoteData.name .. "(" .. argsString .. ")", logColor, priority)
-            
-            -- Enhanced logging data
-            local logEntry = {
-                name = remoteData.name,
-                args = args,
-                timestamp = timestamp,
-                suspicious = remoteData.suspicious,
-                score = remoteData.score or 0,
-                argCount = #args,
-                player = Player.Name
-            }
-            
-            table.insert(ScannerData.networkLogs, logEntry)
-            
-            -- Detect potential exploits
-            if #args > 10 then
-                logMessage("⚠️ ALERT: Excessive arguments (" .. #args .. ") in " .. remoteData.name, 
-                    Color3.fromRGB(255, 0, 0), 5)
-            end
-            
-            for _, arg in pairs(args) do
-                if type(arg) == "number" and (arg > 999999 or arg < -999999) then
-                    logMessage("⚠️ ALERT: Extreme numeric value (" .. arg .. ") in " .. remoteData.name, 
-                        Color3.fromRGB(255, 0, 0), 4)
+    -- Scan Buttons
+    local buttonData = {
+        {text = "🔍 Full Scan", func = function()
+            addLogEntry("🚀 Starting Full Game Scan...", Color3.fromRGB(255, 255, 0))
+            scanRemoteEvents()
+            scanRemoteFunctions() 
+            scanValues()
+            scanGUIs()
+            scanProximityPrompts()
+            scanTouchParts()
+            addLogEntry("✅ Full Scan Complete!", Color3.fromRGB(0, 255, 0))
+        end},
+        {text = "💰 Money Scan", func = function()
+            addLogEntry("💰 Scanning for Money/Currency...", Color3.fromRGB(255, 215, 0))
+            scanValues()
+            scanGUIs()
+        end},
+        {text = "🤖 Auto Touch", func = autoTouchParts},
+        {text = "🖱️ Auto Click", func = autoClickButtons},
+        {text = "📡 Fire Events", func = fireRemoteEvents},
+        {text = "🗑️ Clear Log", func = function()
+            if LogFrame and LogFrame:FindFirstChild("ScrollingFrame") then
+                for _, child in ipairs(LogFrame.ScrollingFrame:GetChildren()) do
+                    if child:IsA("TextLabel") then
+                        child:Destroy()
+                    end
                 end
             end
-            
-            -- Call original function
-            return originalFunction(self, ...)
+        end}
+    }
+    
+    local buttonLayout = Instance.new("UIGridLayout")
+    buttonLayout.CellSize = UDim2.new(0, 90, 0, 35)
+    buttonLayout.CellPadding = UDim2.new(0, 5, 0, 5)
+    buttonLayout.Parent = controlPanel
+    
+    for i, data in ipairs(buttonData) do
+        local btn = Instance.new("TextButton")
+        btn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+        btn.Text = data.text
+        btn.TextColor3 = Color3.new(1, 1, 1)
+        btn.Font = Enum.Font.Gotham
+        btn.TextSize = 10
+        btn.BorderSizePixel = 0
+        btn.Parent = controlPanel
+        
+        local btnCorner = Instance.new("UICorner")
+        btnCorner.CornerRadius = UDim.new(0, 6)
+        btnCorner.Parent = btn
+        
+        btn.MouseButton1Click:Connect(data.func)
+        
+        -- Hover effect
+        btn.MouseEnter:Connect(function()
+            btn.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+        end)
+        
+        btn.MouseLeave:Connect(function()
+            btn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+        end)
+    end
+    
+    -- Log Frame
+    LogFrame = Instance.new("Frame")
+    LogFrame.Size = UDim2.new(1, -20, 1, -170)
+    LogFrame.Position = UDim2.new(0, 10, 0, 160)
+    LogFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+    LogFrame.BorderSizePixel = 0
+    LogFrame.Parent = MainFrame
+    
+    local logCorner = Instance.new("UICorner")
+    logCorner.CornerRadius = UDim.new(0, 8)
+    logCorner.Parent = LogFrame
+    
+    local logTitle = Instance.new("TextLabel")
+    logTitle.Size = UDim2.new(1, 0, 0, 25)
+    logTitle.BackgroundTransparency = 1
+    logTitle.Text = "📋 Scan Results & Logs"
+    logTitle.TextColor3 = Color3.fromRGB(200, 200, 200)
+    logTitle.Font = Enum.Font.GothamBold
+    logTitle.TextSize = 12
+    logTitle.TextXAlignment = Enum.TextXAlignment.Left
+    logTitle.Position = UDim2.new(0, 10, 0, 0)
+    logTitle.Parent = LogFrame
+    
+    local scrollFrame = Instance.new("ScrollingFrame")
+    scrollFrame.Size = UDim2.new(1, -20, 1, -35)
+    scrollFrame.Position = UDim2.new(0, 10, 0, 30)
+    scrollFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+    scrollFrame.BorderSizePixel = 0
+    scrollFrame.ScrollBarThickness = 8
+    scrollFrame.Parent = LogFrame
+    
+    local scrollCorner = Instance.new("UICorner")
+    scrollCorner.CornerRadius = UDim.new(0, 6)
+    scrollCorner.Parent = scrollFrame
+    
+    -- Make draggable
+    local dragging = false
+    local dragStart = nil
+    local startPos = nil
+    
+    titleBar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            dragStart = input.Position
+            startPos = MainFrame.Position
         end
     end)
     
-    ScannerData.hookedRemotes[remoteData.name] = true
-    return true
+    titleBar.InputChanged:Connect(function(input)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            local delta = input.Position - dragStart
+            MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
+    
+    titleBar.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+        end
+    end)
 end
 
-local function hookAllRemotes()
-    if #ScannerData.foundRemotes == 0 then
-        logMessage("❌ No RemoteEvents found. Run scan first!", Color3.fromRGB(255, 0, 0))
-        updateStatus("No RemoteEvents to hook", Color3.fromRGB(255, 0, 0))
-        return
-    end
-    
-    updateStatus("Hooking RemoteEvents...", Color3.fromRGB(255, 255, 0))
-    logMessage("🪝 Starting advanced hook deployment...", Color3.fromRGB(255, 255, 0))
-    
-    local successCount = 0
-    local failCount = 0
-    
-    for _, remoteData in pairs(ScannerData.foundRemotes) do
-        if createAdvancedHook(remoteData) then
-            successCount = successCount + 1
-            logMessage("🪝 Hooked: " .. remoteData.name, Color3.fromRGB(255, 255, 100))
+-- Hotkey
+UserInputService.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    if input.KeyCode == Enum.KeyCode.Insert then
+        if ScannerUI then
+            ScannerUI:Destroy()
         else
-            failCount = failCount + 1
+            buildScannerGUI()
         end
-        wait(0.05) -- Prevent lag
     end
-    
-    -- Auto-hook new remotes
-    if not ScannerData.autoHookConnection then
-        ScannerData.autoHookConnection = ReplicatedStorage.DescendantAdded:Connect(function(obj)
-            if obj:IsA("RemoteEvent") and ScannerData.isLogging then
-                wait(0.2) -- Ensure object is ready
-                local suspiciousScore, patterns = analyzeRemoteName(obj.Name)
-                local remoteData = {
-                    name = obj.Name,
-                    path = obj:GetFullName(),
-                    object = obj,
-                    suspicious = suspiciousScore > 0,
-                    patterns = patterns,
-                    score = suspiciousScore,
-                    timestamp = tick()
-                }
-                
-                table.insert(ScannerData.foundRemotes, remoteData)
-                
-                if createAdvancedHook(remoteData) then
-                    logMessage("🆕 NEW RemoteEvent hooked: " .. obj.Name, Color3.fromRGB(0, 255, 255))
-                    updateRemoteList()
-                end
-            end
-        end)
-    end
-    
-    ScannerData.isLogging = true
-    updateStatus("Monitoring active! (" .. successCount .. " hooks)", Color3.fromRGB(0, 255, 0))
-    logMessage("✅ Hook deployment complete! Success: " .. successCount .. ", Failed: " .. failCount, 
-        Color3.fromRGB(0, 255, 0))
-end
+end)
 
--- Enhanced testing with safety measures
-local function performAdvancedTest(remoteData, testType)
-    if not remoteData.object or not remoteData.object.Parent then
-        logMessage("❌ Cannot test - RemoteEvent no longer exists: " .. remoteData.name, Color3.fromRGB(255, 0, 0))
-        return
-    end
-    
-    updateStatus("Testing " .. remoteData.name, Color3.fromRGB(255, 255, 0))
-    logMessage("🧪 Advanced testing: " .. remoteData.name .. " (Type: " .. testType .. ")", 
-        Color3.fromRGB(255, 255, 0))
-    
-    local testSets = {
-        basic = {1, 10, 100, true, false, "test"},
-        numeric = {0, -1, 999999, -999999, math.huge, -math.huge},
-        string = {"", "admin", "give", "money", "hack", string.rep("A", 1000)},
-        edge = {nil, {}, {money = 999999}, {admin = true}}
-    }
-    
-    local testValues = testSets[testType] or testSets.basic
-    
-    for i, value in pairs(testValues) do
-        safeCall(function()
-            logMessage("   Test " .. i .. "/" .. #testValues .. ": " .. tostring(value), 
-                Color3.fromRGB(200, 200, 200))
-            remoteData.object:FireServer(value)
-            wait(0.3) -- Prevent rate limiting
-        end)
-    end
-    
-    updateStatus("Testing complete", Color3.fromRGB(0, 255, 0))
-    logMessage("✅ Advanced testing complete for: " .. remoteData.name, Color3.fromRGB(0, 255, 0))
-end
+-- Initialize
+buildScannerGUI()
+addLogEntry("🚀 Universal Scanner Loaded! Press INSERT to toggle.", Color3.fromRGB(0, 255, 255))
+addLogEntry("💡 Click 'Full Scan' to analyze the game for exploitable elements.", Color3.fromRGB(200, 200, 200))
 
--- Rest of the GUI code continues with improvements...
--- [Due to length limits, I'll continue with the enhanced GUI in the next part]
+print("Universal Game Scanner Loaded!")
+print("Press INSERT to open/close scanner")
+print("Features:")
+print("- Scans for RemoteEvents, RemoteFunctions, Values")
+print("- Detects money/stats related elements")  
+print("- Auto-exploit functions")
+print("- Real-time logging")
