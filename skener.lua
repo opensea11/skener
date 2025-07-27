@@ -70,11 +70,25 @@ local function addLogEntry(text, color)
         entry.Font = Enum.Font.SourceCodePro
         entry.TextSize = 11
         entry.TextXAlignment = Enum.TextXAlignment.Left
+        entry.TextYAlignment = Enum.TextYAlignment.Top
+        entry.TextWrapped = true
         entry.Parent = LogFrame.ScrollingFrame
         
-        -- Auto-scroll
-        LogFrame.ScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, #LogFrame.ScrollingFrame:GetChildren() * 20)
+        -- Manual layout for entries
+        local yPos = 0
+        for i, child in ipairs(LogFrame.ScrollingFrame:GetChildren()) do
+            if child:IsA("TextLabel") and child ~= entry then
+                yPos = yPos + 20
+            end
+        end
+        entry.Position = UDim2.new(0, 5, 0, yPos)
+        
+        -- Update canvas size
+        LogFrame.ScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, (#LogFrame.ScrollingFrame:GetChildren()) * 20)
         LogFrame.ScrollingFrame.CanvasPosition = Vector2.new(0, LogFrame.ScrollingFrame.CanvasSize.Y.Offset)
+    else
+        -- Fallback: print to console if GUI not ready
+        print(text)
     end
 end
 
@@ -202,7 +216,7 @@ local function scanProximityPrompts()
             if isStats then info = info .. " [📊 STATS: " .. statKeyword .. "]" end
             
             logResult("ProximityPrompts", obj.ObjectText, obj:GetFullName(), info)
-            addLogResult("  🚪 " .. obj.ObjectText .. " - " .. info, isMoney and Color3.fromRGB(255, 215, 0) or Color3.fromRGB(150, 255, 150))
+                            addLogEntry("  🚪 " .. obj.ObjectText .. " - " .. info, isMoney and Color3.fromRGB(255, 215, 0) or Color3.fromRGB(150, 255, 150))
             count = count + 1
         end
     end
@@ -351,40 +365,62 @@ local function buildScannerGUI()
     controlCorner.CornerRadius = UDim.new(0, 8)
     controlCorner.Parent = controlPanel
     
-    -- Scan Buttons
+    -- Scan Buttons with proper error handling
     local buttonData = {
         {text = "🔍 Full Scan", func = function()
+            print("Full Scan button clicked!")
             addLogEntry("🚀 Starting Full Game Scan...", Color3.fromRGB(255, 255, 0))
-            scanRemoteEvents()
-            scanRemoteFunctions() 
-            scanValues()
-            scanGUIs()
-            scanProximityPrompts()
-            scanTouchParts()
+            pcall(scanRemoteEvents)
+            pcall(scanRemoteFunctions)
+            pcall(scanValues)
+            pcall(scanGUIs)
+            pcall(scanProximityPrompts)
+            pcall(scanTouchParts)
             addLogEntry("✅ Full Scan Complete!", Color3.fromRGB(0, 255, 0))
         end},
         {text = "💰 Money Scan", func = function()
+            print("Money Scan button clicked!")
             addLogEntry("💰 Scanning for Money/Currency...", Color3.fromRGB(255, 215, 0))
-            scanValues()
-            scanGUIs()
+            pcall(scanValues)
+            pcall(scanGUIs)
+            addLogEntry("💰 Money scan finished!", Color3.fromRGB(255, 215, 0))
         end},
-        {text = "🤖 Auto Touch", func = autoTouchParts},
-        {text = "🖱️ Auto Click", func = autoClickButtons},
-        {text = "📡 Fire Events", func = fireRemoteEvents},
+        {text = "🤖 Auto Touch", func = function()
+            print("Auto Touch button clicked!")
+            pcall(autoTouchParts)
+        end},
+        {text = "🖱️ Auto Click", func = function()
+            print("Auto Click button clicked!")
+            pcall(autoClickButtons)
+        end},
+        {text = "📡 Fire Events", func = function()
+            print("Fire Events button clicked!")
+            pcall(fireRemoteEvents)
+        end},
         {text = "🗑️ Clear Log", func = function()
+            print("Clear Log button clicked!")
             if LogFrame and LogFrame:FindFirstChild("ScrollingFrame") then
                 for _, child in ipairs(LogFrame.ScrollingFrame:GetChildren()) do
                     if child:IsA("TextLabel") then
                         child:Destroy()
                     end
                 end
+                LogFrame.ScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+                addLogEntry("🗑️ Log cleared!", Color3.fromRGB(200, 200, 200))
             end
+        end},
+        {text = "🧪 Test", func = function()
+            print("Test button clicked!")
+            addLogEntry("🧪 Test button works!", Color3.fromRGB(255, 0, 255))
+            addLogEntry("Player: " .. tostring(Player.Name), Color3.fromRGB(100, 255, 100))
+            addLogEntry("Character: " .. tostring(Player.Character), Color3.fromRGB(100, 255, 100))
         end}
     }
     
     local buttonLayout = Instance.new("UIGridLayout")
-    buttonLayout.CellSize = UDim2.new(0, 90, 0, 35)
+    buttonLayout.CellSize = UDim2.new(0, 85, 0, 35)
     buttonLayout.CellPadding = UDim2.new(0, 5, 0, 5)
+    buttonLayout.SortOrder = Enum.SortOrder.LayoutOrder
     buttonLayout.Parent = controlPanel
     
     for i, data in ipairs(buttonData) do
@@ -442,6 +478,8 @@ local function buildScannerGUI()
     scrollFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
     scrollFrame.BorderSizePixel = 0
     scrollFrame.ScrollBarThickness = 8
+    scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+    scrollFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
     scrollFrame.Parent = LogFrame
     
     local scrollCorner = Instance.new("UICorner")
@@ -475,22 +513,56 @@ local function buildScannerGUI()
     end)
 end
 
--- Hotkey
+-- Hotkey with debug
 UserInputService.InputBegan:Connect(function(input, gpe)
     if gpe then return end
     if input.KeyCode == Enum.KeyCode.Insert then
-        if ScannerUI then
+        print("INSERT key pressed!")
+        if ScannerUI and ScannerUI.Parent then
+            print("Destroying existing GUI")
             ScannerUI:Destroy()
+            ScannerUI = nil
         else
+            print("Creating new GUI")
             buildScannerGUI()
+            wait(0.2)
+            addLogEntry("🔄 Scanner reopened via INSERT key", Color3.fromRGB(100, 200, 255))
         end
+    elseif input.KeyCode == Enum.KeyCode.Home then
+        -- Alternative hotkey for testing
+        print("HOME key pressed - Emergency scanner toggle")
+        if ScannerUI then ScannerUI:Destroy() end
+        buildScannerGUI()
+        addLogEntry("🆘 Emergency scanner activation via HOME key", Color3.fromRGB(255, 100, 100))
     end
 end)
 
--- Initialize
+-- Initialize with debug and test
 buildScannerGUI()
-addLogEntry("🚀 Universal Scanner Loaded! Press INSERT to toggle.", Color3.fromRGB(0, 255, 255))
-addLogEntry("💡 Click 'Full Scan' to analyze the game for exploitable elements.", Color3.fromRGB(200, 200, 200))
+
+-- Wait a moment then add initial logs with test
+spawn(function()
+    wait(1)
+    addLogEntry("🚀 Universal Scanner Loaded! Press INSERT to toggle.", Color3.fromRGB(0, 255, 255))
+    wait(0.2)
+    addLogEntry("💡 Click 'Full Scan' to analyze the game for exploitable elements.", Color3.fromRGB(200, 200, 200))
+    wait(0.2)
+    addLogEntry("🔧 Debug: Scanner GUI created successfully", Color3.fromRGB(100, 255, 100))
+    wait(0.2)
+    addLogEntry("🧪 Try clicking the 'Test' button to verify functionality!", Color3.fromRGB(255, 255, 0))
+end)
+
+-- Debug info
+print("=== UNIVERSAL SCANNER DEBUG ===")
+print("GUI Created:", ScannerUI ~= nil)
+print("MainFrame Created:", MainFrame ~= nil)  
+print("LogFrame Created:", LogFrame ~= nil)
+if LogFrame then
+    print("ScrollingFrame Created:", LogFrame:FindFirstChild("ScrollingFrame") ~= nil)
+end
+print("CoreGui Parent:", ScannerUI and ScannerUI.Parent == CoreGui)
+print("Press INSERT key to toggle scanner visibility")
+print("================================")
 
 print("Universal Game Scanner Loaded!")
 print("Press INSERT to open/close scanner")
