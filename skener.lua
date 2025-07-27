@@ -1,4 +1,29 @@
-local Players = game:GetService("Players")
+-- Test Button untuk debug
+local TestButton = Instance.new("TextButton")
+TestButton.Size = UDim2.new(0, 80, 0, 30)
+TestButton.Position = UDim2.new(0, 120, 0, 40)
+TestButton.BackgroundColor3 = Color3.fromRGB(200, 100, 0)
+TestButton.Text = "🧪 TEST"
+TestButton.TextColor3 = Color3.new(1, 1, 1)
+TestButton.Font = Enum.Font.GothamBold
+TestButton.TextSize = 12
+TestButton.BorderSizePixel = 0
+TestButton.Parent = Frame
+
+local TestCorner = Instance.new("UICorner")
+TestCorner.CornerRadius = UDim.new(0, 6)
+TestCorner.Parent = TestButton
+
+TestButton.MouseButton1Click:Connect(function()
+    clearResults()
+    addResult("🧪 Testing scanner functionality...", Color3.fromRGB(255, 100, 255))
+    addResult("✅ GUI is working!", Color3.fromRGB(0, 255, 0))
+    addResult("✅ Buttons are clickable!", Color3.fromRGB(0, 255, 0))
+    addResult("Player: " .. Player.Name, Color3.fromRGB(100, 200, 255))
+    addResult("Game: " .. game.Name, Color3.fromRGB(100, 200, 255))
+    addResult("ReplicatedStorage exists: " .. tostring(game.ReplicatedStorage ~= nil), Color3.fromRGB(100, 200, 255))
+    print("Test button clicked - GUI is functional!")
+end)local Players = game:GetService("Players")
 local CoreGui = game:GetService("CoreGui")
 local UserInputService = game:GetService("UserInputService")
 
@@ -101,41 +126,101 @@ end
 -- Scanner Function
 local function scanRemoteEvents()
     clearResults()
-    addResult("🔍 Scanning for RemoteEvents...", Color3.fromRGB(100, 200, 255))
+    addResult("🔍 Starting RemoteEvent scan...", Color3.fromRGB(100, 200, 255))
     
     local count = 0
+    local scanned = {}
     
-    -- Scan ReplicatedStorage first (most common location)
-    if game:FindFirstChild("ReplicatedStorage") then
-        addResult("📁 Checking ReplicatedStorage...", Color3.fromRGB(200, 200, 100))
-        for _, obj in pairs(game.ReplicatedStorage:GetDescendants()) do
-            if obj:IsA("RemoteEvent") then
-                count = count + 1
-                addResult("  📡 " .. obj.Name .. " - " .. obj:GetFullName(), Color3.fromRGB(0, 255, 100))
+    -- Debug: Show what services we're scanning
+    addResult("📁 Scanning ReplicatedStorage...", Color3.fromRGB(200, 200, 100))
+    
+    -- Scan ReplicatedStorage
+    local success1, error1 = pcall(function()
+        if game.ReplicatedStorage then
+            for _, obj in pairs(game.ReplicatedStorage:GetDescendants()) do
+                if obj:IsA("RemoteEvent") and not scanned[obj] then
+                    scanned[obj] = true
+                    count = count + 1
+                    addResult("  📡 " .. obj.Name, Color3.fromRGB(0, 255, 100))
+                    addResult("      Path: " .. obj:GetFullName(), Color3.fromRGB(150, 150, 150))
+                end
             end
         end
+    end)
+    
+    if not success1 then
+        addResult("❌ Error scanning ReplicatedStorage: " .. tostring(error1), Color3.fromRGB(255, 100, 100))
     end
     
-    -- Scan entire game (slower)
-    addResult("📁 Checking entire game...", Color3.fromRGB(200, 200, 100))
-    for _, obj in pairs(game:GetDescendants()) do
-        if obj:IsA("RemoteEvent") and not obj:IsDescendantOf(game.ReplicatedStorage) then
-            count = count + 1
-            addResult("  📡 " .. obj.Name .. " - " .. obj:GetFullName(), Color3.fromRGB(255, 200, 0))
+    -- Scan other common locations
+    addResult("📁 Scanning Workspace...", Color3.fromRGB(200, 200, 100))
+    
+    local success2, error2 = pcall(function()
+        for _, obj in pairs(workspace:GetDescendants()) do
+            if obj:IsA("RemoteEvent") and not scanned[obj] then
+                scanned[obj] = true
+                count = count + 1
+                addResult("  📡 " .. obj.Name, Color3.fromRGB(255, 200, 0))
+                addResult("      Path: " .. obj:GetFullName(), Color3.fromRGB(150, 150, 150))
+            end
         end
+    end)
+    
+    if not success2 then
+        addResult("❌ Error scanning Workspace: " .. tostring(error2), Color3.fromRGB(255, 100, 100))
     end
     
+    -- Scan StarterGui
+    addResult("📁 Scanning StarterGui...", Color3.fromRGB(200, 200, 100))
+    
+    local success3, error3 = pcall(function()
+        if game.StarterGui then
+            for _, obj in pairs(game.StarterGui:GetDescendants()) do
+                if obj:IsA("RemoteEvent") and not scanned[obj] then
+                    scanned[obj] = true
+                    count = count + 1
+                    addResult("  📡 " .. obj.Name, Color3.fromRGB(100, 150, 255))
+                    addResult("      Path: " .. obj:GetFullName(), Color3.fromRGB(150, 150, 150))
+                end
+            end
+        end
+    end)
+    
+    if not success3 then
+        addResult("❌ Error scanning StarterGui: " .. tostring(error3), Color3.fromRGB(255, 100, 100))
+    end
+    
+    -- Final results
+    addResult("", Color3.new(1, 1, 1)) -- Empty line
     addResult("✅ Scan complete! Found " .. count .. " RemoteEvents", Color3.fromRGB(0, 255, 0))
     
     if count == 0 then
-        addResult("❌ No RemoteEvents found. Try a different game!", Color3.fromRGB(255, 100, 100))
+        addResult("❌ No RemoteEvents found!", Color3.fromRGB(255, 100, 100))
+        addResult("💡 This game might not have RemoteEvents", Color3.fromRGB(200, 200, 200))
+        addResult("💡 Or they might be protected/hidden", Color3.fromRGB(200, 200, 200))
+    else
+        addResult("💡 You can copy these paths to use in exploits", Color3.fromRGB(200, 200, 200))
     end
 end
 
--- Button Click
+-- Button Click with debug
 ScanButton.MouseButton1Click:Connect(function()
-    print("Scanning RemoteEvents...")
+    print("=== SCAN BUTTON CLICKED ===")
+    print("Player:", Player.Name)
+    print("ReplicatedStorage exists:", game.ReplicatedStorage ~= nil)
+    print("Starting scan...")
+    
+    ScanButton.Text = "⏳ SCANNING..."
+    ScanButton.BackgroundColor3 = Color3.fromRGB(200, 200, 0)
+    
+    wait(0.1) -- Small delay to show button change
+    
     scanRemoteEvents()
+    
+    ScanButton.Text = "🔍 SCAN"
+    ScanButton.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
+    
+    print("=== SCAN COMPLETE ===")
 end)
 
 -- Close Button
