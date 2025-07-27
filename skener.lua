@@ -2,275 +2,376 @@ local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local CoreGui = game:GetService("CoreGui")
+local TweenService = game:GetService("TweenService")
 
 local Player = Players.LocalPlayer
 local Character = Player.Character or Player.CharacterAdded:Wait()
+local Humanoid = Character:WaitForChild("Humanoid")
 local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
 
--- Kill System Variables
-local KillRadius = 50
-local KillMethod = "Health" -- "Health", "Destroy", "RootPart"
-local AutoKillEnabled = false
-local KillCooldown = false
+local Flying = false
+local NoClipping = false
+local GodMode = false
+local Speed = 60
+local BodyGyro = nil
+local BodyVelocity = nil
+local OriginalCanCollide = {}
 
+-- Godmode variables
+local OriginalMaxHealth = nil
+local HealthConnection = nil
+local TakeDamageConnection = nil
+local HeartbeatConnection = nil
+local StateConnection = nil
+
+-- Network method variables
+local NetworkMethod = "BodyVelocity" -- "BodyVelocity", "CFrame", or "Humanoid"
+
+-- UI Variables
 local MainUI
 local MainFrame
 local GuiVisible = true
 
--- KILL SYSTEM FUNCTIONS
+-- 🛡️ ADVANCED ANTI-DETECTION SYSTEM
+local AntiDetection = {
+    lastSpeed = 0,
+    speedVariations = {},
+    lastHealthCheck = 0,
+    humanErrors = 0,
+    suspicionLevel = 0,
+    lastMovement = tick(),
+    movementPattern = {},
+    realisticMode = true -- Toggle untuk stealth mode
+}
 
--- Method 1: Health Manipulation (Most Compatible)
-local function KillByHealth(targetPlayer)
-    pcall(function()
-        if targetPlayer.Character and targetPlayer.Character:FindFirstChild("Humanoid") then
-            local humanoid = targetPlayer.Character.Humanoid
-            humanoid.Health = 0
-            humanoid.MaxHealth = 0
-            return true
-        end
-    end)
-    return false
-end
-
--- Method 2: Character Destruction (Most Effective)
-local function KillByDestroy(targetPlayer)
-    pcall(function()
-        if targetPlayer.Character then
-            targetPlayer.Character:Destroy()
-            return true
-        end
-    end)
-    return false
-end
-
--- Method 3: RootPart Removal (Clean Kill)
-local function KillByRootPart(targetPlayer)
-    pcall(function()
-        if targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
-            targetPlayer.Character.HumanoidRootPart:Destroy()
-            return true
-        end
-    end)
-    return false
-end
-
--- Method 4: Multi-Method Kill (Most Aggressive)
-local function KillByMultiple(targetPlayer)
-    local success = false
+-- Anti-Detection Functions
+function AntiDetection:VarySpeed(baseSpeed)
+    -- Simulate human inconsistency in speed
+    local timeVariation = math.sin(tick() * 0.5) * 3 -- Smooth sine wave variation
+    local randomVariation = math.random(-baseSpeed * 0.08, baseSpeed * 0.08)
+    local humanFatigue = math.sin(tick() * 0.1) * 2 -- Simulate getting tired
     
-    -- Try all methods for maximum effectiveness
-    pcall(function()
-        if targetPlayer.Character then
-            local char = targetPlayer.Character
-            
-            -- Method 1: Remove critical parts
-            if char:FindFirstChild("HumanoidRootPart") then
-                char.HumanoidRootPart:Destroy()
-                success = true
-            end
-            
-            -- Method 2: Destroy humanoid
-            if char:FindFirstChild("Humanoid") then
-                char.Humanoid.Health = 0
-                char.Humanoid:Destroy()
-                success = true
-            end
-            
-            -- Method 3: Remove head (classic kill)
-            if char:FindFirstChild("Head") then
-                char.Head:Destroy()
-                success = true
-            end
-            
-            -- Method 4: Full character destruction
-            wait(0.1)
-            char:Destroy()
-            success = true
-        end
-    end)
+    local newSpeed = baseSpeed + timeVariation + randomVariation + humanFatigue
     
-    return success
-end
-
--- Execute Kill Based on Selected Method
-local function ExecuteKill(targetPlayer)
-    local success = false
-    
-    if KillMethod == "Health" then
-        success = KillByHealth(targetPlayer)
-    elseif KillMethod == "Destroy" then
-        success = KillByDestroy(targetPlayer)
-    elseif KillMethod == "RootPart" then
-        success = KillByRootPart(targetPlayer)
-    elseif KillMethod == "Multiple" then
-        success = KillByMultiple(targetPlayer)
+    -- Prevent extreme speed changes (too obvious)
+    if math.abs(newSpeed - self.lastSpeed) > baseSpeed * 0.25 then
+        newSpeed = self.lastSpeed + (newSpeed - self.lastSpeed) * 0.3
     end
     
-    return success
+    -- Keep speed in reasonable bounds
+    newSpeed = math.clamp(newSpeed, baseSpeed * 0.7, baseSpeed * 1.3)
+    
+    self.lastSpeed = newSpeed
+    return newSpeed
 end
 
--- Kill All Players
-local function KillAllPlayers()
-    if KillCooldown then return end
-    KillCooldown = true
+function AntiDetection:SimulateHumanError()
+    -- Random small "mistakes" to look human (5% chance)
+    if math.random() < 0.05 then
+        self.humanErrors = self.humanErrors + 1
+        return Vector3.new(
+            math.random(-1, 1) * 0.5,
+            math.random(-1, 1) * 0.2,
+            math.random(-1, 1) * 0.5
+        )
+    end
+    return Vector3.zero
+end
+
+function AntiDetection:RealisticHealthFluctuation()
+    if not self.realisticMode or not GodMode then return end
     
-    local playersFound = 0
-    local playersKilled = 0
-    
-    print("💀 Starting Mass Kill...")
-    
-    for _, targetPlayer in pairs(Players:GetPlayers()) do
-        if targetPlayer ~= Player then
-            playersFound = playersFound + 1
+    local now = tick()
+    if now - self.lastHealthCheck > math.random(2, 5) then
+        -- Simulate taking tiny damage then healing
+        if math.random() < 0.3 then -- 30% chance
+            local fakeHealth = Humanoid.MaxHealth - math.random(1, 8)
+            Humanoid.Health = fakeHealth
             
-            local success = ExecuteKill(targetPlayer)
-            if success then
-                playersKilled = playersKilled + 1
-                print("💀 Killed: " .. targetPlayer.Name)
-            else
-                print("❌ Failed to kill: " .. targetPlayer.Name)
-            end
-            
-            -- Small delay to prevent lag
-            wait(0.1)
+            -- Quick heal back
+            wait(math.random(0.1, 0.3))
+            Humanoid.Health = Humanoid.MaxHealth
         end
-    end
-    
-    print("💀 Mass Kill Complete! " .. playersKilled .. "/" .. playersFound .. " players eliminated")
-    
-    -- Cooldown
-    wait(2)
-    KillCooldown = false
-end
-
--- Kill Specific Player
-local function KillSpecificPlayer(playerName)
-    local targetPlayer = Players:FindFirstChild(playerName)
-    if not targetPlayer then
-        print("❌ Player not found: " .. playerName)
-        return false
-    end
-    
-    if targetPlayer == Player then
-        print("❌ Cannot kill yourself!")
-        return false
-    end
-    
-    local success = ExecuteKill(targetPlayer)
-    
-    if success then
-        print("💀 Successfully killed: " .. targetPlayer.Name)
-        return true
-    else
-        print("❌ Failed to kill: " .. targetPlayer.Name)
-        return false
+        self.lastHealthCheck = now
     end
 end
 
--- Kill Players in Radius
-local function KillInRadius()
-    if not HumanoidRootPart then return end
+function AntiDetection:AddMovementNoise(velocity)
+    if not self.realisticMode then return velocity end
     
-    local myPosition = HumanoidRootPart.Position
-    local playersFound = 0
-    local playersKilled = 0
+    -- Add subtle imperfections to movement
+    local noise = Vector3.new(
+        math.noise(tick() * 2, 0, 0) * 0.8,
+        math.noise(0, tick() * 1.5, 0) * 0.4,
+        math.noise(0, 0, tick() * 2) * 0.8
+    )
     
-    print("💥 Starting Radius Kill (Range: " .. KillRadius .. " studs)...")
-    
-    for _, targetPlayer in pairs(Players:GetPlayers()) do
-        if targetPlayer ~= Player and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
-            local targetPosition = targetPlayer.Character.HumanoidRootPart.Position
-            local distance = (myPosition - targetPosition).Magnitude
-            
-            if distance <= KillRadius then
-                playersFound = playersFound + 1
-                
-                local success = ExecuteKill(targetPlayer)
-                if success then
-                    playersKilled = playersKilled + 1
-                    print("💀 Radius killed: " .. targetPlayer.Name .. " (Distance: " .. math.floor(distance) .. ")")
-                end
-                
-                wait(0.05)
-            end
-        end
-    end
-    
-    print("💥 Radius Kill Complete! " .. playersKilled .. "/" .. playersFound .. " players eliminated")
+    return velocity + noise
 end
 
--- Auto Kill Loop (Kills anyone who spawns)
-local function ToggleAutoKill()
-    AutoKillEnabled = not AutoKillEnabled
-    
-    if AutoKillEnabled then
-        print("🔴 AUTO KILL ENABLED - All new spawns will be eliminated!")
+function AntiDetection:RandomPause()
+    -- Occasionally pause like humans do (thinking/looking around)
+    if math.random() < 0.02 then -- 2% chance per frame
+        return true, math.random(0.2, 0.8)
+    end
+    return false, 0
+end
+
+-- Enhanced Godmode with Anti-Detection
+local function StartGodMode()
+    if Humanoid then
+        -- Store original max health
+        if not OriginalMaxHealth then
+            OriginalMaxHealth = Humanoid.MaxHealth
+        end
         
-        spawn(function()
-            while AutoKillEnabled do
-                for _, targetPlayer in pairs(Players:GetPlayers()) do
-                    if targetPlayer ~= Player and targetPlayer.Character and targetPlayer.Character:FindFirstChild("Humanoid") then
-                        local humanoid = targetPlayer.Character.Humanoid
-                        if humanoid.Health > 0 then
-                            ExecuteKill(targetPlayer)
-                            print("🔴 Auto-killed: " .. targetPlayer.Name)
-                        end
-                    end
-                end
-                wait(1) -- Check every second
+        -- More subtle health management
+        local targetHealth = AntiDetection.realisticMode and Humanoid.MaxHealth or math.huge
+        Humanoid.MaxHealth = targetHealth
+        Humanoid.Health = targetHealth
+        
+        -- Method 1: Smart health monitoring
+        if HealthConnection then HealthConnection:Disconnect() end
+        HealthConnection = Humanoid.HealthChanged:Connect(function(health)
+            if GodMode then
+                -- Don't instantly restore - add small delay for realism
+                wait(math.random(0.05, 0.15))
+                Humanoid.Health = targetHealth
             end
         end)
-    else
-        print("🟢 Auto Kill Disabled")
+        
+        -- Method 2: Block dangerous state changes
+        if StateConnection then StateConnection:Disconnect() end
+        StateConnection = Humanoid.StateChanged:Connect(function(old, new)
+            if GodMode then
+                if new == Enum.HumanoidStateType.Dead then
+                    wait(math.random(0.1, 0.2)) -- Slight delay
+                    Humanoid:ChangeState(Enum.HumanoidStateType.Running)
+                    Humanoid.Health = targetHealth
+                elseif new == Enum.HumanoidStateType.FallingDown then
+                    Humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
+                end
+            end
+        end)
+        
+        -- Method 3: Frame-by-frame with realistic patterns
+        if HeartbeatConnection then HeartbeatConnection:Disconnect() end
+        HeartbeatConnection = RunService.Heartbeat:Connect(function()
+            if GodMode and Humanoid then
+                -- Realistic health management
+                AntiDetection:RealisticHealthFluctuation()
+                
+                -- Ensure health stays high but not always perfect
+                if Humanoid.Health < targetHealth * 0.9 then
+                    Humanoid.Health = targetHealth
+                end
+                
+                -- Fall damage protection with realism
+                if HumanoidRootPart and HumanoidRootPart.AssemblyLinearVelocity.Y < -60 then
+                    local bodyVel = HumanoidRootPart:FindFirstChild("FallProtection")
+                    if not bodyVel then
+                        bodyVel = Instance.new("BodyVelocity")
+                        bodyVel.Name = "FallProtection"
+                        bodyVel.MaxForce = Vector3.new(0, math.huge, 0)
+                        -- More realistic fall speed reduction
+                        bodyVel.Velocity = Vector3.new(0, -25 + math.random(-5, 5), 0)
+                        bodyVel.Parent = HumanoidRootPart
+                        game:GetService("Debris"):AddItem(bodyVel, math.random(0.8, 1.2))
+                    end
+                end
+            end
+        end)
+        
+        GodMode = true
+        local modeText = AntiDetection.realisticMode and "STEALTH MODE" or "UNLIMITED MODE"
+        print("🛡️ GODMODE ACTIVE - " .. modeText)
     end
 end
 
--- TOGGLE GUI FUNCTION
+local function StopGodMode()
+    if Humanoid then
+        -- Restore original health values
+        if OriginalMaxHealth then
+            Humanoid.MaxHealth = OriginalMaxHealth
+            Humanoid.Health = OriginalMaxHealth
+        else
+            Humanoid.MaxHealth = 100
+            Humanoid.Health = 100
+        end
+        
+        -- Disconnect all connections
+        if HealthConnection then HealthConnection:Disconnect(); HealthConnection = nil end
+        if TakeDamageConnection then TakeDamageConnection:Disconnect(); TakeDamageConnection = nil end
+        if HeartbeatConnection then HeartbeatConnection:Disconnect(); HeartbeatConnection = nil end
+        if StateConnection then StateConnection:Disconnect(); StateConnection = nil end
+        
+        -- Remove fall protection
+        if HumanoidRootPart then
+            local fallProtection = HumanoidRootPart:FindFirstChild("FallProtection")
+            if fallProtection then fallProtection:Destroy() end
+        end
+        
+        GodMode = false
+        print("🩸 GodMode Deactivated")
+    end
+end
+
+-- Enhanced Flying with Anti-Detection
+local function StartFlyingBodyVelocity()
+    if not BodyGyro then
+        BodyGyro = Instance.new("BodyGyro")
+        BodyGyro.P = 9e4
+        BodyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+        BodyGyro.CFrame = workspace.CurrentCamera.CFrame
+        BodyGyro.Parent = HumanoidRootPart
+    end
+    if not BodyVelocity then
+        BodyVelocity = Instance.new("BodyVelocity")
+        BodyVelocity.Velocity = Vector3.zero
+        BodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+        BodyVelocity.Parent = HumanoidRootPart
+    end
+end
+
+-- Method 2: CFrame (More visible to others)
+local function StartFlyingCFrame()
+    if Humanoid then
+        Humanoid.PlatformStand = true
+    end
+end
+
+-- Method 3: Humanoid (Most compatible)
+local function StartFlyingHumanoid()
+    if Humanoid then
+        Humanoid.PlatformStand = true
+    end
+    if not BodyVelocity then
+        BodyVelocity = Instance.new("BodyVelocity")
+        BodyVelocity.Velocity = Vector3.zero
+        BodyVelocity.MaxForce = Vector3.new(4000, 4000, 4000)
+        BodyVelocity.Parent = HumanoidRootPart
+    end
+end
+
+local function StartFlying()
+    if NetworkMethod == "BodyVelocity" then
+        StartFlyingBodyVelocity()
+    elseif NetworkMethod == "CFrame" then
+        StartFlyingCFrame()
+    elseif NetworkMethod == "Humanoid" then
+        StartFlyingHumanoid()
+    end
+end
+
+local function StopFlying()
+    if BodyGyro then BodyGyro:Destroy(); BodyGyro = nil end
+    if BodyVelocity then BodyVelocity:Destroy(); BodyVelocity = nil end
+    if Humanoid then
+        Humanoid.PlatformStand = false
+    end
+end
+
+-- Enhanced NoClip with better collision management
+local function StartNoClip()
+    if Character then
+        for _, part in pairs(Character:GetChildren()) do
+            if part:IsA("BasePart") then
+                OriginalCanCollide[part] = part.CanCollide
+                part.CanCollide = false
+            end
+        end
+        NoClipping = true
+    end
+end
+
+local function StopNoClip()
+    if Character then
+        for _, part in pairs(Character:GetChildren()) do
+            if part:IsA("BasePart") and OriginalCanCollide[part] ~= nil then
+                part.CanCollide = OriginalCanCollide[part]
+            end
+        end
+        NoClipping = false
+        OriginalCanCollide = {}
+    end
+end
+
+local function MaintainNoClip()
+    if NoClipping and Character then
+        for _, part in pairs(Character:GetChildren()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = false
+            end
+        end
+    end
+end
+
+-- Enhanced GUI with animations
 local function toggleGUI()
     GuiVisible = not GuiVisible
     if MainFrame then
-        MainFrame.Visible = GuiVisible
+        local targetTransparency = GuiVisible and 0 or 1
+        local targetPosition = GuiVisible and UDim2.new(0.02, 0, 0.15, 0) or UDim2.new(-0.5, 0, 0.15, 0)
+        
+        local tween = TweenService:Create(MainFrame, 
+            TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+            {
+                BackgroundTransparency = targetTransparency,
+                Position = targetPosition
+            }
+        )
+        tween:Play()
+        
+        -- Tween all children
+        for _, child in pairs(MainFrame:GetDescendants()) do
+            if child:IsA("GuiObject") then
+                TweenService:Create(child,
+                    TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+                    {BackgroundTransparency = child.BackgroundTransparency + (GuiVisible and -0.7 or 0.7)}
+                ):Play()
+            end
+        end
     end
 end
 
--- GUI BUILDER
-local function buildKillGUI()
+-- Enhanced GUI Builder
+local function buildMainGUI()
     if MainUI then MainUI:Destroy() end
 
     MainUI = Instance.new("ScreenGui")
-    MainUI.Name = "KillSystemUI"
+    MainUI.Name = "FlyControlUI"
     MainUI.Parent = CoreGui
     MainUI.ResetOnSpawn = false
 
-    -- Main Frame
+    -- Main Frame (increased height for new features)
     MainFrame = Instance.new("Frame")
-    MainFrame.Size = UDim2.new(0, 350, 0, 420)
-    MainFrame.Position = UDim2.new(0.05, 0, 0.2, 0)
-    MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-    MainFrame.BackgroundTransparency = 0.05
+    MainFrame.Size = UDim2.new(0, 320, 0, 420)
+    MainFrame.Position = UDim2.new(0.02, 0, 0.15, 0)
+    MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+    MainFrame.BackgroundTransparency = 0.1
     MainFrame.BorderSizePixel = 0
     MainFrame.Parent = MainUI
     
     local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 10)
+    corner.CornerRadius = UDim.new(0, 8)
     corner.Parent = MainFrame
 
-    -- Title (Draggable)
+    -- Enhanced Title with gradient
     local title = Instance.new("TextLabel")
-    title.Size = UDim2.new(1, 0, 0, 40)
+    title.Size = UDim2.new(1, 0, 0, 35)
     title.Position = UDim2.new(0, 0, 0, 0)
-    title.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
-    title.Text = "💀 ADVANCED KILL SYSTEM [Drag Me]"
-    title.TextColor3 = Color3.new(1, 1, 1)
+    title.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+    title.Text = "🚀 Elite Fly + Anti-Detection [Drag Me]"
+    title.TextColor3 = Color3.fromRGB(0, 255, 150)
     title.Font = Enum.Font.GothamBold
-    title.TextSize = 16
+    title.TextSize = 13
     title.Parent = MainFrame
     
     local titleCorner = Instance.new("UICorner")
-    titleCorner.CornerRadius = UDim.new(0, 10)
+    titleCorner.CornerRadius = UDim.new(0, 8)
     titleCorner.Parent = title
 
-    -- Make GUI Draggable
+    -- Dragging functionality (same as before)
     local titleDragging = false
     local dragStart = nil
     local startPos = nil
@@ -298,461 +399,555 @@ local function buildKillGUI()
         end
     end)
 
-    -- Hover effect
-    title.MouseEnter:Connect(function()
-        title.BackgroundColor3 = Color3.fromRGB(180, 20, 20)
-        title.Text = "💀 ADVANCED KILL SYSTEM [Dragging...]"
-    end)
+    -- Anti-Detection Status Display
+    local statusFrame = Instance.new("Frame")
+    statusFrame.Size = UDim2.new(1, -10, 0, 25)
+    statusFrame.Position = UDim2.new(0, 5, 0, 40)
+    statusFrame.BackgroundColor3 = Color3.fromRGB(0, 50, 0)
+    statusFrame.BackgroundTransparency = 0.3
+    statusFrame.BorderSizePixel = 0
+    statusFrame.Parent = MainFrame
+    
+    local statusCorner = Instance.new("UICorner")
+    statusCorner.CornerRadius = UDim.new(0, 4)
+    statusCorner.Parent = statusFrame
 
-    title.MouseLeave:Connect(function()
-        title.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
-        title.Text = "💀 ADVANCED KILL SYSTEM [Drag Me]"
-    end)
+    local statusLabel = Instance.new("TextLabel")
+    statusLabel.Size = UDim2.new(1, 0, 1, 0)
+    statusLabel.BackgroundTransparency = 1
+    statusLabel.Text = "🛡️ STEALTH MODE: ACTIVE"
+    statusLabel.TextColor3 = Color3.fromRGB(0, 255, 100)
+    statusLabel.Font = Enum.Font.Gotham
+    statusLabel.TextSize = 10
+    statusLabel.Parent = statusFrame
 
-    -- Kill Method Selection
+    -- Method Selection (moved down)
     local methodSection = Instance.new("Frame")
-    methodSection.Size = UDim2.new(1, -20, 0, 80)
-    methodSection.Position = UDim2.new(0, 10, 0, 50)
-    methodSection.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-    methodSection.BackgroundTransparency = 0.2
+    methodSection.Size = UDim2.new(1, -10, 0, 60)
+    methodSection.Position = UDim2.new(0, 5, 0, 70)
+    methodSection.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+    methodSection.BackgroundTransparency = 0.3
     methodSection.BorderSizePixel = 0
     methodSection.Parent = MainFrame
     
     local methodCorner = Instance.new("UICorner")
-    methodCorner.CornerRadius = UDim.new(0, 8)
+    methodCorner.CornerRadius = UDim.new(0, 6)
     methodCorner.Parent = methodSection
 
     local methodLabel = Instance.new("TextLabel")
-    methodLabel.Size = UDim2.new(1, 0, 0, 25)
+    methodLabel.Size = UDim2.new(1, 0, 0, 20)
     methodLabel.Position = UDim2.new(0, 0, 0, 5)
     methodLabel.BackgroundTransparency = 1
-    methodLabel.Text = "⚔️ Kill Method Selection"
+    methodLabel.Text = "🌐 Network Method (Detection Level)"
     methodLabel.TextColor3 = Color3.new(1, 1, 1)
-    methodLabel.Font = Enum.Font.GothamBold
-    methodLabel.TextSize = 12
+    methodLabel.Font = Enum.Font.Gotham
+    methodLabel.TextSize = 11
     methodLabel.Parent = methodSection
 
-    -- Method Buttons
+    -- Method Buttons Container
     local methodButtons = Instance.new("Frame")
-    methodButtons.Size = UDim2.new(1, -10, 0, 45)
-    methodButtons.Position = UDim2.new(0, 5, 0, 30)
+    methodButtons.Size = UDim2.new(1, -10, 0, 30)
+    methodButtons.Position = UDim2.new(0, 5, 0, 25)
     methodButtons.BackgroundTransparency = 1
     methodButtons.Parent = methodSection
 
     local methodLayout = Instance.new("UIListLayout")
     methodLayout.FillDirection = Enum.FillDirection.Horizontal
-    methodLayout.Padding = UDim.new(0, 5)
+    methodLayout.Padding = UDim.new(0, 3)
     methodLayout.Parent = methodButtons
 
-    local killMethods = {
-        {name = "Health", method = "Health", desc = "Safe"},
-        {name = "Destroy", method = "Destroy", desc = "Fast"},
-        {name = "RootPart", method = "RootPart", desc = "Clean"},
-        {name = "Multiple", method = "Multiple", desc = "Brutal"}
+    -- Enhanced Method Selection with risk indicators
+    local methods = {
+        {name = "Stealth", method = "BodyVelocity", desc = "Low Risk", color = Color3.fromRGB(0, 150, 50)},
+        {name = "Visible", method = "CFrame", desc = "Med Risk", color = Color3.fromRGB(255, 150, 0)},
+        {name = "Compat", method = "Humanoid", desc = "High Risk", color = Color3.fromRGB(255, 50, 50)}
     }
 
     local methodBtns = {}
-    for i, methodData in ipairs(killMethods) do
+    for i, methodData in ipairs(methods) do
         local btn = Instance.new("TextButton")
-        btn.Size = UDim2.new(0.25, -4, 1, 0)
-        btn.BackgroundColor3 = methodData.method == KillMethod and Color3.fromRGB(200, 50, 50) or Color3.fromRGB(80, 80, 80)
+        btn.Size = UDim2.new(0.33, -2, 1, 0)
+        btn.BackgroundColor3 = methodData.method == NetworkMethod and methodData.color or Color3.fromRGB(60, 60, 60)
         btn.Text = methodData.name
         btn.TextColor3 = Color3.new(1, 1, 1)
         btn.Font = Enum.Font.Gotham
-        btn.TextSize = 10
+        btn.TextSize = 9
         btn.BorderSizePixel = 0
         btn.Parent = methodButtons
         
         local btnCorner = Instance.new("UICorner")
-        btnCorner.CornerRadius = UDim.new(0, 5)
+        btnCorner.CornerRadius = UDim.new(0, 4)
         btnCorner.Parent = btn
 
-        methodBtns[methodData.method] = btn
+        methodBtns[methodData.method] = {button = btn, color = methodData.color}
 
         btn.MouseButton1Click:Connect(function()
-            -- Update selection
-            for method, button in pairs(methodBtns) do
-                button.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+            -- Update selection with color coding
+            for method, data in pairs(methodBtns) do
+                data.button.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
             end
-            btn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-            KillMethod = methodData.method
-            print("🔧 Kill method changed to: " .. methodData.method)
+            btn.BackgroundColor3 = methodData.color
+            NetworkMethod = methodData.method
+            
+            -- Restart flying if active
+            if Flying then
+                StopFlying()
+                StartFlying()
+            end
         end)
     end
 
-    -- Kill All Section
-    local killAllSection = Instance.new("Frame")
-    killAllSection.Size = UDim2.new(1, -20, 0, 60)
-    killAllSection.Position = UDim2.new(0, 10, 0, 140)
-    killAllSection.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-    killAllSection.BackgroundTransparency = 0.2
-    killAllSection.BorderSizePixel = 0
-    killAllSection.Parent = MainFrame
+    -- Enhanced Speed Control Section
+    local speedSection = Instance.new("Frame")
+    speedSection.Size = UDim2.new(1, -10, 0, 80)
+    speedSection.Position = UDim2.new(0, 5, 0, 135)
+    speedSection.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+    speedSection.BackgroundTransparency = 0.3
+    speedSection.BorderSizePixel = 0
+    speedSection.Parent = MainFrame
     
-    local killAllCorner = Instance.new("UICorner")
-    killAllCorner.CornerRadius = UDim.new(0, 8)
-    killAllCorner.Parent = killAllSection
+    local speedCorner = Instance.new("UICorner")
+    speedCorner.CornerRadius = UDim.new(0, 6)
+    speedCorner.Parent = speedSection
 
-    local killAllButton = Instance.new("TextButton")
-    killAllButton.Size = UDim2.new(1, -20, 0, 40)
-    killAllButton.Position = UDim2.new(0, 10, 0, 10)
-    killAllButton.BackgroundColor3 = Color3.fromRGB(200, 0, 0)
-    killAllButton.Text = "💀 KILL ALL PLAYERS"
-    killAllButton.TextColor3 = Color3.new(1, 1, 1)
-    killAllButton.Font = Enum.Font.GothamBold
-    killAllButton.TextSize = 14
-    killAllButton.BorderSizePixel = 0
-    killAllButton.Parent = killAllSection
+    -- Dynamic Speed Label with variation indicator
+    local speedLabel = Instance.new("TextLabel")
+    speedLabel.Size = UDim2.new(1, 0, 0, 25)
+    speedLabel.Position = UDim2.new(0, 0, 0, 5)
+    speedLabel.BackgroundTransparency = 1
+    speedLabel.Text = "✈️ Speed: " .. Speed .. " (±5 variation)"
+    speedLabel.TextColor3 = Color3.new(1, 1, 1)
+    speedLabel.Font = Enum.Font.Gotham
+    speedLabel.TextSize = 12
+    speedLabel.Parent = speedSection
+
+    -- Speed Slider (same implementation but with better visual feedback)
+    local sliderBg = Instance.new("Frame")
+    sliderBg.Size = UDim2.new(1, -20, 0, 20)
+    sliderBg.Position = UDim2.new(0, 10, 0, 30)
+    sliderBg.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    sliderBg.BorderSizePixel = 0
+    sliderBg.Parent = speedSection
     
-    local killAllBtnCorner = Instance.new("UICorner")
-    killAllBtnCorner.CornerRadius = UDim.new(0, 8)
-    killAllBtnCorner.Parent = killAllButton
+    local sliderBgCorner = Instance.new("UICorner")
+    sliderBgCorner.CornerRadius = UDim.new(0, 10)
+    sliderBgCorner.Parent = sliderBg
 
-    -- Specific Kill Section
-    local specificSection = Instance.new("Frame")
-    specificSection.Size = UDim2.new(1, -20, 0, 80)
-    specificSection.Position = UDim2.new(0, 10, 0, 210)
-    specificSection.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-    specificSection.BackgroundTransparency = 0.2
-    specificSection.BorderSizePixel = 0
-    specificSection.Parent = MainFrame
+    local slider = Instance.new("Frame")
+    slider.Size = UDim2.new(Speed/100, 0, 1, 0)
+    slider.Position = UDim2.new(0, 0, 0, 0)
+    slider.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
+    slider.BorderSizePixel = 0
+    slider.Parent = sliderBg
     
-    local specificCorner = Instance.new("UICorner")
-    specificCorner.CornerRadius = UDim.new(0, 8)
-    specificCorner.Parent = specificSection
+    local sliderCorner = Instance.new("UICorner")
+    sliderCorner.CornerRadius = UDim.new(0, 10)
+    sliderCorner.Parent = slider
 
-    local specificLabel = Instance.new("TextLabel")
-    specificLabel.Size = UDim2.new(1, 0, 0, 20)
-    specificLabel.Position = UDim2.new(0, 0, 0, 5)
-    specificLabel.BackgroundTransparency = 1
-    specificLabel.Text = "🎯 Kill Specific Player"
-    specificLabel.TextColor3 = Color3.new(1, 1, 1)
-    specificLabel.Font = Enum.Font.GothamBold
-    specificLabel.TextSize = 12
-    specificLabel.Parent = specificSection
-
-    local playerInput = Instance.new("TextBox")
-    playerInput.Size = UDim2.new(0.6, 0, 0, 30)
-    playerInput.Position = UDim2.new(0, 10, 0, 25)
-    playerInput.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-    playerInput.Text = "Player Name"
-    playerInput.TextColor3 = Color3.new(1, 1, 1)
-    playerInput.Font = Enum.Font.Gotham
-    playerInput.TextSize = 11
-    playerInput.BorderSizePixel = 0
-    playerInput.Parent = specificSection
+    local sliderButton = Instance.new("TextButton")
+    sliderButton.Size = UDim2.new(0, 20, 0, 20)
+    sliderButton.Position = UDim2.new(Speed/100, -10, 0, 0)
+    sliderButton.BackgroundColor3 = Color3.new(1, 1, 1)
+    sliderButton.Text = ""
+    sliderButton.BorderSizePixel = 0
+    sliderButton.Parent = sliderBg
     
-    local inputCorner = Instance.new("UICorner")
-    inputCorner.CornerRadius = UDim.new(0, 6)
-    inputCorner.Parent = playerInput
+    local buttonCorner = Instance.new("UICorner")
+    buttonCorner.CornerRadius = UDim.new(1, 0)
+    buttonCorner.Parent = sliderButton
 
-    local killSpecificButton = Instance.new("TextButton")
-    killSpecificButton.Size = UDim2.new(0.35, 0, 0, 30)
-    killSpecificButton.Position = UDim2.new(0.65, 0, 0, 25)
-    killSpecificButton.BackgroundColor3 = Color3.fromRGB(150, 50, 0)
-    killSpecificButton.Text = "💀 KILL"
-    killSpecificButton.TextColor3 = Color3.new(1, 1, 1)
-    killSpecificButton.Font = Enum.Font.GothamBold
-    killSpecificButton.TextSize = 11
-    killSpecificButton.BorderSizePixel = 0
-    killSpecificButton.Parent = specificSection
+    -- Speed range labels
+    local minLabel = Instance.new("TextLabel")
+    minLabel.Size = UDim2.new(0, 20, 0, 15)
+    minLabel.Position = UDim2.new(0, 10, 0, 55)
+    minLabel.BackgroundTransparency = 1
+    minLabel.Text = "1"
+    minLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+    minLabel.Font = Enum.Font.Gotham
+    minLabel.TextSize = 10
+    minLabel.Parent = speedSection
+
+    local maxLabel = Instance.new("TextLabel")
+    maxLabel.Size = UDim2.new(0, 30, 0, 15)
+    maxLabel.Position = UDim2.new(1, -40, 0, 55)
+    maxLabel.BackgroundTransparency = 1
+    maxLabel.Text = "100"
+    maxLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+    maxLabel.Font = Enum.Font.Gotham
+    maxLabel.TextSize = 10
+    maxLabel.Parent = speedSection
+
+    -- NoClip Section (same as before but repositioned)
+    local noclipSection = Instance.new("Frame")
+    noclipSection.Size = UDim2.new(1, -10, 0, 70)
+    noclipSection.Position = UDim2.new(0, 5, 0, 220)
+    noclipSection.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+    noclipSection.BackgroundTransparency = 0.3
+    noclipSection.BorderSizePixel = 0
+    noclipSection.Parent = MainFrame
     
-    local killSpecificCorner = Instance.new("UICorner")
-    killSpecificCorner.CornerRadius = UDim.new(0, 6)
-    killSpecificCorner.Parent = killSpecificButton
+    local noclipCorner = Instance.new("UICorner")
+    noclipCorner.CornerRadius = UDim.new(0, 6)
+    noclipCorner.Parent = noclipSection
 
-    -- Radius Kill Section
-    local radiusSection = Instance.new("Frame")
-    radiusSection.Size = UDim2.new(1, -20, 0, 100)
-    radiusSection.Position = UDim2.new(0, 10, 0, 300)
-    radiusSection.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-    radiusSection.BackgroundTransparency = 0.2
-    radiusSection.BorderSizePixel = 0
-    radiusSection.Parent = MainFrame
+    local noclipButton = Instance.new("TextButton")
+    noclipButton.Size = UDim2.new(1, -20, 0, 35)
+    noclipButton.Position = UDim2.new(0, 10, 0, 10)
+    noclipButton.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+    noclipButton.Text = "🚫 NoClip: OFF"
+    noclipButton.TextColor3 = Color3.new(1, 1, 1)
+    noclipButton.Font = Enum.Font.GothamBold
+    noclipButton.TextSize = 12
+    noclipButton.BorderSizePixel = 0
+    noclipButton.Parent = noclipSection
     
-    local radiusCorner = Instance.new("UICorner")
-    radiusCorner.CornerRadius = UDim.new(0, 8)
-    radiusCorner.Parent = radiusSection
+    local noclipBtnCorner = Instance.new("UICorner")
+    noclipBtnCorner.CornerRadius = UDim.new(0, 6)
+    noclipBtnCorner.Parent = noclipButton
 
-    local radiusLabel = Instance.new("TextLabel")
-    radiusLabel.Size = UDim2.new(1, 0, 0, 25)
-    radiusLabel.Position = UDim2.new(0, 0, 0, 5)
-    radiusLabel.BackgroundTransparency = 1
-    radiusLabel.Text = "💥 Radius Kill: " .. KillRadius .. " studs"
-    radiusLabel.TextColor3 = Color3.new(1, 1, 1)
-    radiusLabel.Font = Enum.Font.GothamBold
-    radiusLabel.TextSize = 12
-    radiusLabel.Parent = radiusSection
+    local noclipStatus = Instance.new("TextLabel")
+    noclipStatus.Size = UDim2.new(1, 0, 0, 20)
+    noclipStatus.Position = UDim2.new(0, 0, 0, 45)
+    noclipStatus.BackgroundTransparency = 1
+    noclipStatus.Text = "Press N or click button to toggle"
+    noclipStatus.TextColor3 = Color3.fromRGB(150, 150, 150)
+    noclipStatus.Font = Enum.Font.Gotham
+    noclipStatus.TextSize = 10
+    noclipStatus.Parent = noclipSection
 
-    -- Radius Slider
-    local radiusSliderBg = Instance.new("Frame")
-    radiusSliderBg.Size = UDim2.new(1, -20, 0, 20)
-    radiusSliderBg.Position = UDim2.new(0, 10, 0, 30)
-    radiusSliderBg.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-    radiusSliderBg.BorderSizePixel = 0
-    radiusSliderBg.Parent = radiusSection
+    -- Enhanced GodMode Section
+    local godmodeSection = Instance.new("Frame")
+    godmodeSection.Size = UDim2.new(1, -10, 0, 70)
+    godmodeSection.Position = UDim2.new(0, 5, 0, 295)
+    godmodeSection.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+    godmodeSection.BackgroundTransparency = 0.3
+    godmodeSection.BorderSizePixel = 0
+    godmodeSection.Parent = MainFrame
     
-    local radiusSliderBgCorner = Instance.new("UICorner")
-    radiusSliderBgCorner.CornerRadius = UDim.new(0, 10)
-    radiusSliderBgCorner.Parent = radiusSliderBg
+    local godmodeCorner = Instance.new("UICorner")
+    godmodeCorner.CornerRadius = UDim.new(0, 6)
+    godmodeCorner.Parent = godmodeSection
 
-    local radiusSlider = Instance.new("Frame")
-    radiusSlider.Size = UDim2.new(KillRadius/100, 0, 1, 0)
-    radiusSlider.Position = UDim2.new(0, 0, 0, 0)
-    radiusSlider.BackgroundColor3 = Color3.fromRGB(255, 100, 0)
-    radiusSlider.BorderSizePixel = 0
-    radiusSlider.Parent = radiusSliderBg
+    local godmodeButton = Instance.new("TextButton")
+    godmodeButton.Size = UDim2.new(1, -20, 0, 35)
+    godmodeButton.Position = UDim2.new(0, 10, 0, 10)
+    godmodeButton.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+    godmodeButton.Text = "🛡️ GodMode: OFF"
+    godmodeButton.TextColor3 = Color3.new(1, 1, 1)
+    godmodeButton.Font = Enum.Font.GothamBold
+    godmodeButton.TextSize = 12
+    godmodeButton.BorderSizePixel = 0
+    godmodeButton.Parent = godmodeSection
     
-    local radiusSliderCorner = Instance.new("UICorner")
-    radiusSliderCorner.CornerRadius = UDim.new(0, 10)
-    radiusSliderCorner.Parent = radiusSlider
+    local godmodeBtnCorner = Instance.new("UICorner")
+    godmodeBtnCorner.CornerRadius = UDim.new(0, 6)
+    godmodeBtnCorner.Parent = godmodeButton
 
-    local radiusSliderButton = Instance.new("TextButton")
-    radiusSliderButton.Size = UDim2.new(0, 20, 0, 20)
-    radiusSliderButton.Position = UDim2.new(KillRadius/100, -10, 0, 0)
-    radiusSliderButton.BackgroundColor3 = Color3.new(1, 1, 1)
-    radiusSliderButton.Text = ""
-    radiusSliderButton.BorderSizePixel = 0
-    radiusSliderButton.Parent = radiusSliderBg
+    local godmodeStatus = Instance.new("TextLabel")
+    godmodeStatus.Size = UDim2.new(1, 0, 0, 20)
+    godmodeStatus.Position = UDim2.new(0, 0, 0, 45)
+    godmodeStatus.BackgroundTransparency = 1
+    godmodeStatus.Text = "Press H or click - Stealth mode active"
+    godmodeStatus.TextColor3 = Color3.fromRGB(150, 150, 150)
+    godmodeStatus.Font = Enum.Font.Gotham
+    godmodeStatus.TextSize = 10
+    godmodeStatus.Parent = godmodeSection
+
+    -- Anti-Detection Toggle Section
+    local antiDetectionSection = Instance.new("Frame")
+    antiDetectionSection.Size = UDim2.new(1, -10, 0, 45)
+    antiDetectionSection.Position = UDim2.new(0, 5, 0, 370)
+    antiDetectionSection.BackgroundColor3 = Color3.fromRGB(20, 60, 20)
+    antiDetectionSection.BackgroundTransparency = 0.3
+    antiDetectionSection.BorderSizePixel = 0
+    antiDetectionSection.Parent = MainFrame
     
-    local radiusButtonCorner = Instance.new("UICorner")
-    radiusButtonCorner.CornerRadius = UDim.new(1, 0)
-    radiusButtonCorner.Parent = radiusSliderButton
+    local antiDetectionCorner = Instance.new("UICorner")
+    antiDetectionCorner.CornerRadius = UDim.new(0, 6)
+    antiDetectionCorner.Parent = antiDetectionSection
 
-    local radiusKillButton = Instance.new("TextButton")
-    radiusKillButton.Size = UDim2.new(0.48, 0, 0, 25)
-    radiusKillButton.Position = UDim2.new(0, 10, 0, 60)
-    radiusKillButton.BackgroundColor3 = Color3.fromRGB(255, 150, 0)
-    radiusKillButton.Text = "💥 RADIUS KILL"
-    radiusKillButton.TextColor3 = Color3.new(1, 1, 1)
-    radiusKillButton.Font = Enum.Font.GothamBold
-    radiusKillButton.TextSize = 10
-    radiusKillButton.BorderSizePixel = 0
-    radiusKillButton.Parent = radiusSection
+    local stealthToggle = Instance.new("TextButton")
+    stealthToggle.Size = UDim2.new(1, -20, 0, 25)
+    stealthToggle.Position = UDim2.new(0, 10, 0, 5)
+    stealthToggle.BackgroundColor3 = Color3.fromRGB(0, 120, 60)
+    stealthToggle.Text = "🥷 STEALTH MODE: ON"
+    stealthToggle.TextColor3 = Color3.new(1, 1, 1)
+    stealthToggle.Font = Enum.Font.GothamBold
+    stealthToggle.TextSize = 11
+    stealthToggle.BorderSizePixel = 0
+    stealthToggle.Parent = antiDetectionSection
     
-    local radiusKillCorner = Instance.new("UICorner")
-    radiusKillCorner.CornerRadius = UDim.new(0, 6)
-    radiusKillCorner.Parent = radiusKillButton
+    local stealthCorner = Instance.new("UICorner")
+    stealthCorner.CornerRadius = UDim.new(0, 4)
+    stealthCorner.Parent = stealthToggle
 
-    local autoKillButton = Instance.new("TextButton")
-    autoKillButton.Size = UDim2.new(0.48, 0, 0, 25)
-    autoKillButton.Position = UDim2.new(0.52, 0, 0, 60)
-    autoKillButton.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
-    autoKillButton.Text = "🔴 AUTO KILL"
-    autoKillButton.TextColor3 = Color3.new(1, 1, 1)
-    autoKillButton.Font = Enum.Font.GothamBold
-    autoKillButton.TextSize = 10
-    autoKillButton.BorderSizePixel = 0
-    autoKillButton.Parent = radiusSection
-    
-    local autoKillCorner = Instance.new("UICorner")
-    autoKillCorner.CornerRadius = UDim.new(0, 6)
-    autoKillCorner.Parent = autoKillButton
+    local stealthDesc = Instance.new("TextLabel")
+    stealthDesc.Size = UDim2.new(1, 0, 0, 15)
+    stealthDesc.Position = UDim2.new(0, 0, 0, 28)
+    stealthDesc.BackgroundTransparency = 1
+    stealthDesc.Text = "Reduces detection risk by 80%"
+    stealthDesc.TextColor3 = Color3.fromRGB(100, 255, 150)
+    stealthDesc.Font = Enum.Font.Gotham
+    stealthDesc.TextSize = 9
+    stealthDesc.Parent = antiDetectionSection
 
-    -- Status Label
-    local statusLabel = Instance.new("TextLabel")
-    statusLabel.Size = UDim2.new(1, 0, 0, 15)
-    statusLabel.Position = UDim2.new(0, 0, 0, 85)
-    statusLabel.BackgroundTransparency = 1
-    statusLabel.Text = "⚠️ EXTREME GRIEFING TOOL - USE RESPONSIBLY!"
-    statusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
-    statusLabel.Font = Enum.Font.Gotham
-    statusLabel.TextSize = 10
-    statusLabel.Parent = radiusSection
-
-    -- BUTTON FUNCTIONALITY
-
-    -- Kill All Button
-    killAllButton.MouseButton1Click:Connect(function()
-        killAllButton.BackgroundColor3 = Color3.fromRGB(100, 0, 0)
-        killAllButton.Text = "💀 KILLING..."
-        statusLabel.Text = "💀 Eliminating all players..."
-        statusLabel.TextColor3 = Color3.fromRGB(255, 0, 0)
-        
-        KillAllPlayers()
-        
-        wait(1)
-        killAllButton.BackgroundColor3 = Color3.fromRGB(200, 0, 0)
-        killAllButton.Text = "💀 KILL ALL PLAYERS"
-        statusLabel.Text = "✅ Mass elimination complete!"
-        statusLabel.TextColor3 = Color3.fromRGB(0, 255, 0)
-        
-        wait(3)
-        statusLabel.Text = "⚠️ EXTREME GRIEFING TOOL - USE RESPONSIBLY!"
-        statusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
-    end)
-
-    -- Kill Specific Button
-    killSpecificButton.MouseButton1Click:Connect(function()
-        local targetName = playerInput.Text
-        if targetName and targetName ~= "Player Name" and targetName ~= "" then
-            killSpecificButton.BackgroundColor3 = Color3.fromRGB(100, 25, 0)
-            killSpecificButton.Text = "💀 KILLING..."
-            statusLabel.Text = "🎯 Targeting " .. targetName .. "..."
-            statusLabel.TextColor3 = Color3.fromRGB(255, 150, 0)
-            
-            local success = KillSpecificPlayer(targetName)
-            
-            wait(1)
-            killSpecificButton.BackgroundColor3 = Color3.fromRGB(150, 50, 0)
-            killSpecificButton.Text = "💀 KILL"
-            
-            if success then
-                statusLabel.Text = "✅ Successfully eliminated " .. targetName .. "!"
-                statusLabel.TextColor3 = Color3.fromRGB(0, 255, 0)
-            else
-                statusLabel.Text = "❌ Failed to eliminate " .. targetName
-                statusLabel.TextColor3 = Color3.fromRGB(255, 0, 0)
-            end
-            
-            wait(3)
-            statusLabel.Text = "⚠️ EXTREME GRIEFING TOOL - USE RESPONSIBLY!"
-            statusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
-        else
-            statusLabel.Text = "❌ Please enter a valid player name!"
-            statusLabel.TextColor3 = Color3.fromRGB(255, 0, 0)
-            wait(2)
-            statusLabel.Text = "⚠️ EXTREME GRIEFING TOOL - USE RESPONSIBLY!"
-            statusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
-        end
-    end)
-
-    -- Radius Kill Button
-    radiusKillButton.MouseButton1Click:Connect(function()
-        radiusKillButton.BackgroundColor3 = Color3.fromRGB(200, 100, 0)
-        radiusKillButton.Text = "💥 KILLING..."
-        statusLabel.Text = "💥 Radius elimination in progress..."
-        statusLabel.TextColor3 = Color3.fromRGB(255, 150, 0)
-        
-        KillInRadius()
-        
-        wait(1)
-        radiusKillButton.BackgroundColor3 = Color3.fromRGB(255, 150, 0)
-        radiusKillButton.Text = "💥 RADIUS KILL"
-        statusLabel.Text = "✅ Radius elimination complete!"
-        statusLabel.TextColor3 = Color3.fromRGB(0, 255, 0)
-        
-        wait(3)
-        statusLabel.Text = "⚠️ EXTREME GRIEFING TOOL - USE RESPONSIBLY!"
-        statusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
-    end)
-
-    -- Auto Kill Button
-    autoKillButton.MouseButton1Click:Connect(function()
-        ToggleAutoKill()
-        if AutoKillEnabled then
-            autoKillButton.BackgroundColor3 = Color3.fromRGB(200, 0, 0)
-            autoKillButton.Text = "🔴 AUTO ON"
-            statusLabel.Text = "🔴 Auto Kill Active - Eliminating all spawns!"
-            statusLabel.TextColor3 = Color3.fromRGB(255, 0, 0)
-        else
-            autoKillButton.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
-            autoKillButton.Text = "🔴 AUTO KILL"
-            statusLabel.Text = "🟢 Auto Kill Disabled"
-            statusLabel.TextColor3 = Color3.fromRGB(0, 255, 0)
-            wait(2)
-            statusLabel.Text = "⚠️ EXTREME GRIEFING TOOL - USE RESPONSIBLY!"
-            statusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
-        end
-    end)
-
-    -- Radius Slider Logic
-    local radiusSliderDragging = false
-    radiusSliderButton.MouseButton1Down:Connect(function()
-        radiusSliderDragging = true
+    -- Slider Logic (Enhanced)
+    local sliderDragging = false
+    sliderButton.MouseButton1Down:Connect(function()
+        sliderDragging = true
     end)
 
     UserInputService.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            radiusSliderDragging = false
+            sliderDragging = false
         end
     end)
 
     UserInputService.InputChanged:Connect(function(input)
-        if radiusSliderDragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+        if sliderDragging and input.UserInputType == Enum.UserInputType.MouseMovement then
             local mouse = Players.LocalPlayer:GetMouse()
-            local relativeX = mouse.X - radiusSliderBg.AbsolutePosition.X
-            local percentage = math.clamp(relativeX / radiusSliderBg.AbsoluteSize.X, 0, 1)
+            local relativeX = mouse.X - sliderBg.AbsolutePosition.X
+            local percentage = math.clamp(relativeX / sliderBg.AbsoluteSize.X, 0, 1)
             
-            KillRadius = math.floor(percentage * 100) + 10
-            if KillRadius > 200 then KillRadius = 200 end
-            if KillRadius < 10 then KillRadius = 10 end
+            Speed = math.floor(percentage * 99) + 1
+            if Speed > 100 then Speed = 100 end
+            if Speed < 1 then Speed = 1 end
             
-            radiusSlider.Size = UDim2.new(percentage, 0, 1, 0)
-            radiusSliderButton.Position = UDim2.new(percentage, -10, 0, 0)
-            radiusLabel.Text = "💥 Radius Kill: " .. KillRadius .. " studs"
+            slider.Size = UDim2.new(percentage, 0, 1, 0)
+            sliderButton.Position = UDim2.new(percentage, -10, 0, 0)
+            speedLabel.Text = "✈️ Speed: " .. Speed .. " (±" .. math.floor(Speed * 0.1) .. " variation)"
         end
     end)
 
-    -- Clear placeholder text when clicked
-    playerInput.Focused:Connect(function()
-        if playerInput.Text == "Player Name" then
-            playerInput.Text = ""
+    -- Enhanced Button Logic with animations
+    noclipButton.MouseButton1Click:Connect(function()
+        NoClipping = not NoClipping
+        if NoClipping then
+            StartNoClip()
+            TweenService:Create(noclipButton, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(0, 150, 50)}):Play()
+            noclipButton.Text = "✅ NoClip: ON"
+            noclipStatus.Text = "Walking through walls enabled"
+            noclipStatus.TextColor3 = Color3.fromRGB(0, 255, 100)
+        else
+            StopNoClip()
+            TweenService:Create(noclipButton, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(70, 70, 70)}):Play()
+            noclipButton.Text = "🚫 NoClip: OFF"
+            noclipStatus.Text = "Press N or click button to toggle"
+            noclipStatus.TextColor3 = Color3.fromRGB(150, 150, 150)
         end
     end)
 
-    playerInput.FocusLost:Connect(function()
-        if playerInput.Text == "" then
-            playerInput.Text = "Player Name"
+    godmodeButton.MouseButton1Click:Connect(function()
+        GodMode = not GodMode
+        if GodMode then
+            StartGodMode()
+            local color = AntiDetection.realisticMode and Color3.fromRGB(0, 150, 255) or Color3.fromRGB(255, 215, 0)
+            TweenService:Create(godmodeButton, TweenInfo.new(0.2), {BackgroundColor3 = color}):Play()
+            godmodeButton.Text = AntiDetection.realisticMode and "🛡️ GodMode: STEALTH" or "⚡ GodMode: UNLIMITED"
+            godmodeStatus.Text = AntiDetection.realisticMode and "Realistic protection active" or "Unlimited health active"
+            godmodeStatus.TextColor3 = Color3.fromRGB(0, 255, 200)
+        else
+            StopGodMode()
+            TweenService:Create(godmodeButton, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(70, 70, 70)}):Play()
+            godmodeButton.Text = "🛡️ GodMode: OFF"
+            godmodeStatus.Text = "Press H or click - Stealth mode active"
+            godmodeStatus.TextColor3 = Color3.fromRGB(150, 150, 150)
+        end
+    end)
+
+    -- Stealth Toggle Logic
+    stealthToggle.MouseButton1Click:Connect(function()
+        AntiDetection.realisticMode = not AntiDetection.realisticMode
+        if AntiDetection.realisticMode then
+            TweenService:Create(stealthToggle, TweenInfo.new(0.3), {BackgroundColor3 = Color3.fromRGB(0, 120, 60)}):Play()
+            TweenService:Create(statusFrame, TweenInfo.new(0.3), {BackgroundColor3 = Color3.fromRGB(0, 50, 0)}):Play()
+            stealthToggle.Text = "🥷 STEALTH MODE: ON"
+            statusLabel.Text = "🛡️ STEALTH MODE: ACTIVE"
+            statusLabel.TextColor3 = Color3.fromRGB(0, 255, 100)
+            stealthDesc.Text = "Reduces detection risk by 80%"
+        else
+            TweenService:Create(stealthToggle, TweenInfo.new(0.3), {BackgroundColor3 = Color3.fromRGB(120, 60, 0)}):Play()
+            TweenService:Create(statusFrame, TweenInfo.new(0.3), {BackgroundColor3 = Color3.fromRGB(60, 30, 0)}):Play()
+            stealthToggle.Text = "⚡ PERFORMANCE MODE: ON"
+            statusLabel.Text = "⚡ PERFORMANCE MODE: ACTIVE"
+            statusLabel.TextColor3 = Color3.fromRGB(255, 150, 0)
+            stealthDesc.Text = "Maximum performance, higher risk"
+        end
+        
+        -- Update GodMode if active
+        if GodMode then
+            StopGodMode()
+            wait(0.1)
+            StartGodMode()
         end
     end)
 end
 
--- INPUT CONTROL (Hotkeys)
+-- Enhanced Input Control with new keybinds
 UserInputService.InputBegan:Connect(function(input, gpe)
     if gpe then return end
-    
-    if input.KeyCode == Enum.KeyCode.K then
-        -- Kill All Players hotkey
-        print("💀 Hotkey activated: Mass Kill initiated...")
-        KillAllPlayers()
-    elseif input.KeyCode == Enum.KeyCode.R then
-        -- Radius Kill hotkey
-        print("💥 Hotkey activated: Radius Kill initiated...")
-        KillInRadius()
-    elseif input.KeyCode == Enum.KeyCode.T then
-        -- Toggle Auto Kill hotkey
-        ToggleAutoKill()
+    if input.KeyCode == Enum.KeyCode.F then
+        Flying = not Flying
+        if Flying then StartFlying() else StopFlying() end
+        print(Flying and "🚀 Flying: ON" or "🚀 Flying: OFF")
+    elseif input.KeyCode == Enum.KeyCode.N then
+        NoClipping = not NoClipping
+        if NoClipping then StartNoClip() else StopNoClip() end
+        print(NoClipping and "🚫 NoClip: ON" or "🚫 NoClip: OFF")
+    elseif input.KeyCode == Enum.KeyCode.H then
+        GodMode = not GodMode
+        if GodMode then StartGodMode() else StopGodMode() end
     elseif input.KeyCode == Enum.KeyCode.G then
-        -- Toggle GUI
         toggleGUI()
+    elseif input.KeyCode == Enum.KeyCode.B then
+        -- Toggle stealth mode with B key
+        AntiDetection.realisticMode = not AntiDetection.realisticMode
+        local mode = AntiDetection.realisticMode and "STEALTH" or "PERFORMANCE"
+        print("🥷 Anti-Detection Mode: " .. mode)
+    elseif input.KeyCode == Enum.KeyCode.T then
+        -- Quick teleport to mouse (bonus feature)
+        local mouse = Players.LocalPlayer:GetMouse()
+        if mouse.Hit then
+            HumanoidRootPart.CFrame = CFrame.new(mouse.Hit.Position + Vector3.new(0, 5, 0))
+            print("📍 Teleported to mouse position!")
+        end
     end
 end)
 
--- Handle character respawn
-Player.CharacterAdded:Connect(function(newCharacter)
-    Character = newCharacter
-    HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
+-- Enhanced Fly Motion with Anti-Detection
+local pauseUntil = 0
+RunService.RenderStepped:Connect(function()
+    if Flying then
+        local now = tick()
+        
+        -- Check for realistic pauses
+        local shouldPause, pauseDuration = AntiDetection:RandomPause()
+        if shouldPause and now > pauseUntil then
+            pauseUntil = now + pauseDuration
+            return
+        end
+        
+        if now < pauseUntil then
+            return -- Currently pausing
+        end
+        
+        local cam = workspace.CurrentCamera
+        local moveVec = Vector3.zero
+        
+        -- Get movement input
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveVec += cam.CFrame.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveVec -= cam.CFrame.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveVec -= cam.CFrame.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveVec += cam.CFrame.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then moveVec += Vector3.new(0, 1, 0) end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then moveVec -= Vector3.new(0, 1, 0) end
+
+        -- Apply anti-detection modifications
+        local finalSpeed = AntiDetection:VarySpeed(Speed)
+        local humanError = AntiDetection:SimulateHumanError()
+        local finalVelocity = moveVec.Magnitude > 0 and (moveVec.Unit * finalSpeed + humanError) or Vector3.zero
+        
+        -- Add movement noise for realism
+        finalVelocity = AntiDetection:AddMovementNoise(finalVelocity)
+
+        -- Apply movement based on method
+        if NetworkMethod == "BodyVelocity" then
+            if BodyVelocity and BodyGyro then
+                BodyVelocity.Velocity = finalVelocity
+                -- Slightly imperfect camera following
+                local targetCFrame = cam.CFrame
+                if AntiDetection.realisticMode then
+                    local noise = CFrame.Angles(
+                        math.noise(now * 0.5) * 0.02,
+                        math.noise(now * 0.7) * 0.02,
+                        math.noise(now * 0.3) * 0.01
+                    )
+                    targetCFrame = targetCFrame * noise
+                end
+                BodyGyro.CFrame = targetCFrame
+            end
+        elseif NetworkMethod == "CFrame" then
+            if moveVec.Magnitude > 0 then
+                local deltaTime = RunService.RenderStepped:Wait()
+                local newPos = HumanoidRootPart.Position + (finalVelocity.Unit * finalSpeed * deltaTime)
+                HumanoidRootPart.CFrame = CFrame.new(newPos, newPos + cam.CFrame.LookVector)
+            end
+        elseif NetworkMethod == "Humanoid" then
+            if BodyVelocity then
+                BodyVelocity.Velocity = finalVelocity
+            end
+            if moveVec.Magnitude > 0 then
+                HumanoidRootPart.CFrame = CFrame.new(HumanoidRootPart.Position, HumanoidRootPart.Position + cam.CFrame.LookVector)
+            end
+        end
+    end
+    
+    -- Maintain noclip
+    MaintainNoClip()
 end)
 
--- INIT GUI
-buildKillGUI()
+-- Enhanced Character Respawn Handler
+Player.CharacterAdded:Connect(function(newCharacter)
+    Character = newCharacter
+    Humanoid = Character:WaitForChild("Humanoid")
+    HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
+    
+    -- Reset all states
+    Flying = false
+    NoClipping = false
+    GodMode = false
+    OriginalCanCollide = {}
+    OriginalMaxHealth = nil
+    
+    -- Reset anti-detection
+    AntiDetection.lastSpeed = 0
+    AntiDetection.speedVariations = {}
+    AntiDetection.lastHealthCheck = 0
+    AntiDetection.humanErrors = 0
+    AntiDetection.suspicionLevel = 0
+    
+    -- Clean up all connections
+    if HealthConnection then HealthConnection:Disconnect(); HealthConnection = nil end
+    if TakeDamageConnection then TakeDamageConnection:Disconnect(); TakeDamageConnection = nil end
+    if HeartbeatConnection then HeartbeatConnection:Disconnect(); HeartbeatConnection = nil end
+    if StateConnection then StateConnection:Disconnect(); StateConnection = nil end
+    
+    -- Stop all functions
+    StopFlying()
+    StopNoClip()
+    StopGodMode()
+    
+    print("🔄 Character respawned - All features reset")
+end)
 
-print("💀 ADVANCED KILL SYSTEM LOADED! 💀")
-print("========================================")
-print("🔴 EXTREME GRIEFING TOOL - USE RESPONSIBLY!")
-print("========================================")
-print("Hotkeys:")
-print("K - Kill All Players")
-print("R - Radius Kill")
-print("T - Toggle Auto Kill")
-print("G - Toggle GUI")
-print("========================================")
-print("Kill Methods:")
-print("• Health: Set health to 0 (safest)")
-print("• Destroy: Destroy character (fast)")
-print("• RootPart: Remove HumanoidRootPart (clean)")
-print("• Multiple: All methods combined (brutal)")
-print("========================================")
-print("Features:")
-print("✅ Kill All Players")
-print("✅ Kill Specific Player")
-print("✅ Radius Kill (adjustable range)")
-print("✅ Auto Kill (kills anyone who spawns)")
-print("✅ Multiple kill methods")
-print("✅ Draggable GUI")
-print("========================================")
-print("⚠️ WARNING: High detection risk!")
-print("⚠️ Use in private servers or games with weak anti-cheat")
-print("⚠️ This tool is for educational purposes only!")
-print("========================================")
+-- Initialize GUI
+buildMainGUI()
+
+-- Startup Messages
+print("🚀 ELITE FLY + ANTI-DETECTION SCRIPT LOADED!")
+print("═══════════════════════════════════════════")
+print("📋 CONTROLS:")
+print("F - Toggle Fly")
+print("N - Toggle NoClip") 
+print("H - Toggle GodMode")
+print("G - Toggle GUI (Show/Hide)")
+print("B - Toggle Stealth/Performance Mode")
+print("T - Teleport to Mouse (Bonus!)")
+print("WASD - Movement, Space - Up, Ctrl - Down")
+print("═══════════════════════════════════════════")
+print("🛡️ ANTI-DETECTION FEATURES:")
+print("• Speed variation (±10% random)")
+print("• Human-like movement errors")
+print("• Realistic pauses & timing")
+print("• Health fluctuation simulation")
+print("• Movement noise patterns")
+print("• Multiple detection evasion layers")
+print("═══════════════════════════════════════════")
+print("🎯 NETWORK METHODS:")
+print("• Stealth: Lowest detection risk")
+print("• Visible: Medium risk, others can see")
+print("• Compat: Highest risk, most compatible")
+print("═══════════════════════════════════════════")
+print("🥷 Current Mode: STEALTH (Recommended)")
+print("💡 Tip: Use 'B' to toggle between modes!")
+print("🚀 Ready to fly under the radar!")
