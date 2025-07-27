@@ -1,393 +1,1006 @@
 local Players = game:GetService("Players")
-local CoreGui = game:GetService("CoreGui")
 local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local CoreGui = game:GetService("CoreGui")
 
 local Player = Players.LocalPlayer
+local Character = Player.Character or Player.CharacterAdded:Wait()
+local Humanoid = Character:WaitForChild("Humanoid")
+local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
 
--- Money keywords
-local MoneyKeywords = {"money", "cash", "coin", "currency", "dollar", "credit", "point", "score", "gold", "silver", "gem", "diamond", "buck", "wallet", "bank", "balance"}
+local Flying = false
+local NoClipping = false
+local GodMode = false
+local Speed = 60
+local BodyGyro = nil
+local BodyVelocity = nil
+local OriginalCanCollide = {}
 
--- Simple GUI
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "MoneyScanner"
-ScreenGui.Parent = CoreGui
+-- Godmode variables
+local OriginalMaxHealth = nil
+local HealthConnection = nil
+local TakeDamageConnection = nil
+local HeartbeatConnection = nil
+local StateConnection = nil
 
-local Frame = Instance.new("Frame")
-Frame.Size = UDim2.new(0, 500, 0, 400)
-Frame.Position = UDim2.new(0.5, -250, 0.5, -200)
-Frame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-Frame.BorderSizePixel = 0
-Frame.Parent = ScreenGui
+-- Network method variables
+local NetworkMethod = "BodyVelocity" -- "BodyVelocity", "CFrame", or "Humanoid"
 
-local Corner = Instance.new("UICorner")
-Corner.CornerRadius = UDim.new(0, 8)
-Corner.Parent = Frame
+-- Bring All Players variables
+local BringRadius = 10
+local BringHeight = 5
 
--- Title
-local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(1, 0, 0, 30)
-Title.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-Title.Text = "💰 Money & Notification Scanner"
-Title.TextColor3 = Color3.new(1, 1, 1)
-Title.Font = Enum.Font.GothamBold
-Title.TextSize = 14
-Title.Parent = Frame
+local MainUI
+local MainFrame
+local GuiVisible = true
 
-local TitleCorner = Instance.new("UICorner")
-TitleCorner.CornerRadius = UDim.new(0, 8)
-TitleCorner.Parent = Title
-
--- Buttons
-local ButtonFrame = Instance.new("Frame")
-ButtonFrame.Size = UDim2.new(1, -20, 0, 40)
-ButtonFrame.Position = UDim2.new(0, 10, 0, 40)
-ButtonFrame.BackgroundTransparency = 1
-ButtonFrame.Parent = Frame
-
--- Scan Leaderstats Button
-local LeaderstatsButton = Instance.new("TextButton")
-LeaderstatsButton.Size = UDim2.new(0, 90, 0, 30)
-LeaderstatsButton.Position = UDim2.new(0, 0, 0, 0)
-LeaderstatsButton.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
-LeaderstatsButton.Text = "👑 Leaderstats"
-LeaderstatsButton.TextColor3 = Color3.new(1, 1, 1)
-LeaderstatsButton.Font = Enum.Font.Gotham
-LeaderstatsButton.TextSize = 10
-LeaderstatsButton.BorderSizePixel = 0
-LeaderstatsButton.Parent = ButtonFrame
-
-local LeaderstatsCorner = Instance.new("UICorner")
-LeaderstatsCorner.CornerRadius = UDim.new(0, 6)
-LeaderstatsCorner.Parent = LeaderstatsButton
-
--- Scan GUI Button
-local GUIButton = Instance.new("TextButton")
-GUIButton.Size = UDim2.new(0, 90, 0, 30)
-GUIButton.Position = UDim2.new(0, 100, 0, 0)
-GUIButton.BackgroundColor3 = Color3.fromRGB(0, 100, 200)
-GUIButton.Text = "🖼️ GUI Money"
-GUIButton.TextColor3 = Color3.new(1, 1, 1)
-GUIButton.Font = Enum.Font.Gotham
-GUIButton.TextSize = 10
-GUIButton.BorderSizePixel = 0
-GUIButton.Parent = ButtonFrame
-
-local GUICorner = Instance.new("UICorner")
-GUICorner.CornerRadius = UDim.new(0, 6)
-GUICorner.Parent = GUIButton
-
--- Scan Values Button
-local ValuesButton = Instance.new("TextButton")
-ValuesButton.Size = UDim2.new(0, 90, 0, 30)
-ValuesButton.Position = UDim2.new(0, 200, 0, 0)
-ValuesButton.BackgroundColor3 = Color3.fromRGB(200, 100, 0)
-ValuesButton.Text = "💎 Values"
-ValuesButton.TextColor3 = Color3.new(1, 1, 1)
-ValuesButton.Font = Enum.Font.Gotham
-ValuesButton.TextSize = 10
-ValuesButton.BorderSizePixel = 0
-ValuesButton.Parent = ButtonFrame
-
-local ValuesCorner = Instance.new("UICorner")
-ValuesCorner.CornerRadius = UDim.new(0, 6)
-ValuesCorner.Parent = ValuesButton
-
--- Scan Checkpoints Button
-local CheckpointButton = Instance.new("TextButton")
-CheckpointButton.Size = UDim2.new(0, 90, 0, 30)
-CheckpointButton.Position = UDim2.new(0, 300, 0, 0)
-CheckpointButton.BackgroundColor3 = Color3.fromRGB(150, 0, 150)
-CheckpointButton.Text = "🏁 Checkpoints"
-CheckpointButton.TextColor3 = Color3.new(1, 1, 1)
-CheckpointButton.Font = Enum.Font.Gotham
-CheckpointButton.TextSize = 10
-CheckpointButton.BorderSizePixel = 0
-CheckpointButton.Parent = ButtonFrame
-
-local CheckpointCorner = Instance.new("UICorner")
-CheckpointCorner.CornerRadius = UDim.new(0, 6)
-CheckpointCorner.Parent = CheckpointButton
-
--- Clear Button
-local ClearButton = Instance.new("TextButton")
-ClearButton.Size = UDim2.new(0, 70, 0, 30)
-ClearButton.Position = UDim2.new(1, -80, 0, 0)
-ClearButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-ClearButton.Text = "🗑️ Clear"
-ClearButton.TextColor3 = Color3.new(1, 1, 1)
-ClearButton.Font = Enum.Font.Gotham
-ClearButton.TextSize = 10
-ClearButton.BorderSizePixel = 0
-ClearButton.Parent = ButtonFrame
-
-local ClearCorner = Instance.new("UICorner")
-ClearCorner.CornerRadius = UDim.new(0, 6)
-ClearCorner.Parent = ClearButton
-
--- Results List
-local ScrollFrame = Instance.new("ScrollingFrame")
-ScrollFrame.Size = UDim2.new(1, -20, 1, -90)
-ScrollFrame.Position = UDim2.new(0, 10, 0, 80)
-ScrollFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-ScrollFrame.BorderSizePixel = 0
-ScrollFrame.ScrollBarThickness = 6
-ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
-ScrollFrame.Parent = Frame
-
-local ScrollCorner = Instance.new("UICorner")
-ScrollCorner.CornerRadius = UDim.new(0, 6)
-ScrollCorner.Parent = ScrollFrame
-
--- Utility Functions
-local function containsKeyword(text)
-    text = string.lower(tostring(text))
-    for _, keyword in ipairs(MoneyKeywords) do
-        if string.find(text, keyword) then
-            return true, keyword
-        end
-    end
-    return false
+-- BRING ALL PLAYERS FUNCTIONS
+local function BringAllPlayers()
+	if not HumanoidRootPart then return end
+	
+	local myPosition = HumanoidRootPart.Position
+	local playersFound = 0
+	local playersBrought = 0
+	
+	print("🌀 Starting Bring All Players...")
+	
+	for _, targetPlayer in pairs(Players:GetPlayers()) do
+		if targetPlayer ~= Player then
+			playersFound = playersFound + 1
+			
+			pcall(function()
+				if targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
+					local targetRoot = targetPlayer.Character.HumanoidRootPart
+					
+					-- Calculate random position around player
+					local angle = math.rad(math.random(0, 360))
+					local distance = math.random(3, BringRadius)
+					
+					local offsetX = math.sin(angle) * distance
+					local offsetZ = math.cos(angle) * distance
+					local offsetY = BringHeight
+					
+					local newPosition = myPosition + Vector3.new(offsetX, offsetY, offsetZ)
+					
+					-- Method 1: Direct CFrame manipulation
+					targetRoot.CFrame = CFrame.new(newPosition)
+					
+					-- Method 2: Velocity-based (more natural)
+					local bodyVel = targetRoot:FindFirstChild("BringVelocity")
+					if not bodyVel then
+						bodyVel = Instance.new("BodyVelocity")
+						bodyVel.Name = "BringVelocity"
+						bodyVel.MaxForce = Vector3.new(4000, 4000, 4000)
+						bodyVel.Parent = targetRoot
+						
+						-- Auto cleanup after 2 seconds
+						game:GetService("Debris"):AddItem(bodyVel, 2)
+					end
+					
+					local direction = (newPosition - targetRoot.Position).Unit
+					bodyVel.Velocity = direction * 50
+					
+					playersBrought = playersBrought + 1
+					print("✅ Brought: " .. targetPlayer.Name)
+				else
+					print("❌ Failed: " .. targetPlayer.Name .. " (No character)")
+				end
+			end)
+			
+			-- Small delay to prevent lag
+			wait(0.05)
+		end
+	end
+	
+	print("🎯 Bring Complete! " .. playersBrought .. "/" .. playersFound .. " players brought")
 end
 
-local function clearResults()
-    for _, child in pairs(ScrollFrame:GetChildren()) do
-        if child:IsA("TextLabel") then
-            child:Destroy()
-        end
-    end
-    ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+local function BringSpecificPlayer(playerName)
+	local targetPlayer = Players:FindFirstChild(playerName)
+	if not targetPlayer then
+		print("❌ Player not found: " .. playerName)
+		return false
+	end
+	
+	if targetPlayer == Player then
+		print("❌ Cannot bring yourself!")
+		return false
+	end
+	
+	pcall(function()
+		if targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
+			local targetRoot = targetPlayer.Character.HumanoidRootPart
+			local myPosition = HumanoidRootPart.Position
+			
+			-- Position in front of player
+			local newPosition = myPosition + (HumanoidRootPart.CFrame.LookVector * 5)
+			targetRoot.CFrame = CFrame.new(newPosition)
+			
+			print("✅ Brought player: " .. targetPlayer.Name)
+			return true
+		else
+			print("❌ Player has no character: " .. targetPlayer.Name)
+			return false
+		end
+	end)
 end
 
-local function addResult(text, color)
-    local label = Instance.new("TextLabel")
-    label.Size = UDim2.new(1, -10, 0, 20)
-    label.BackgroundTransparency = 1
-    label.Text = text
-    label.TextColor3 = color or Color3.new(1, 1, 1)
-    label.Font = Enum.Font.SourceCode
-    label.TextSize = 11
-    label.TextXAlignment = Enum.TextXAlignment.Left
-    label.TextWrapped = true
-    label.Parent = ScrollFrame
-    
-    -- Position labels
-    local yPos = 0
-    for i, child in pairs(ScrollFrame:GetChildren()) do
-        if child:IsA("TextLabel") and child ~= label then
-            yPos = yPos + 20
-        end
-    end
-    label.Position = UDim2.new(0, 5, 0, yPos)
-    
-    -- Update canvas size
-    ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, (#ScrollFrame:GetChildren()) * 20)
+-- GODMODE FUNCTIONS (unchanged)
+local function StartGodMode()
+	if Humanoid then
+		-- Store original max health
+		if not OriginalMaxHealth then
+			OriginalMaxHealth = Humanoid.MaxHealth
+		end
+		
+		-- FORCE UNLIMITED HEALTH - Multiple methods
+		Humanoid.MaxHealth = math.huge
+		Humanoid.Health = math.huge
+		
+		-- Method 1: Health monitoring (instant restore)
+		if HealthConnection then HealthConnection:Disconnect() end
+		HealthConnection = Humanoid.HealthChanged:Connect(function(health)
+			if GodMode then
+				Humanoid.MaxHealth = math.huge
+				Humanoid.Health = math.huge
+			end
+		end)
+		
+		-- Method 2: Block state changes that can kill
+		if StateConnection then StateConnection:Disconnect() end
+		StateConnection = Humanoid.StateChanged:Connect(function(old, new)
+			if GodMode then
+				if new == Enum.HumanoidStateType.Dead then
+					Humanoid:ChangeState(Enum.HumanoidStateType.Running)
+					Humanoid.Health = math.huge
+				elseif new == Enum.HumanoidStateType.FallingDown then
+					Humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
+				end
+			end
+		end)
+		
+		-- Method 3: Frame-by-frame forced unlimited health
+		if HeartbeatConnection then HeartbeatConnection:Disconnect() end
+		HeartbeatConnection = RunService.Heartbeat:Connect(function()
+			if GodMode and Humanoid then
+				-- Force unlimited health every frame
+				if Humanoid.MaxHealth ~= math.huge then
+					Humanoid.MaxHealth = math.huge
+				end
+				if Humanoid.Health ~= math.huge then
+					Humanoid.Health = math.huge
+				end
+				
+				-- Disable fall damage states
+				pcall(function()
+					Humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+					Humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+				end)
+				
+				-- Slow down extreme falls
+				if HumanoidRootPart and HumanoidRootPart.AssemblyLinearVelocity.Y < -80 then
+					local bodyVel = HumanoidRootPart:FindFirstChild("FallProtection")
+					if not bodyVel then
+						bodyVel = Instance.new("BodyVelocity")
+						bodyVel.Name = "FallProtection"
+						bodyVel.MaxForce = Vector3.new(0, math.huge, 0)
+						bodyVel.Velocity = Vector3.new(0, -30, 0)
+						bodyVel.Parent = HumanoidRootPart
+						game:GetService("Debris"):AddItem(bodyVel, 1)
+					end
+				end
+			end
+		end)
+		
+		-- Method 4: Block damage functions
+		pcall(function()
+			if TakeDamageConnection then TakeDamageConnection:Disconnect() end
+			local takeDamage = Humanoid:FindFirstChild("TakeDamage")
+			if takeDamage then
+				TakeDamageConnection = takeDamage:Connect(function()
+					Humanoid.Health = math.huge
+					return false -- Block damage
+				end)
+			end
+		end)
+		
+		-- Method 5: Block death event
+		pcall(function()
+			Humanoid.Died:Connect(function()
+				if GodMode then
+					wait()
+					Humanoid.Health = math.huge
+					Humanoid.MaxHealth = math.huge
+					Humanoid:ChangeState(Enum.HumanoidStateType.Running)
+				end
+			end)
+		end)
+		
+		GodMode = true
+		print("🛡️ UNLIMITED HEALTH ACTIVE - Completely invincible!")
+		print("Health: ∞ | MaxHealth: ∞")
+	end
 end
 
--- Scan Leaderstats
-local function scanLeaderstats()
-    clearResults()
-    addResult("👑 Scanning Player Leaderstats...", Color3.fromRGB(255, 215, 0))
-    
-    if Player:FindFirstChild("leaderstats") then
-        addResult("✅ Found leaderstats!", Color3.fromRGB(0, 255, 0))
-        
-        for _, stat in pairs(Player.leaderstats:GetChildren()) do
-            local value = tostring(stat.Value)
-            local isMoney, keyword = containsKeyword(stat.Name)
-            
-            if isMoney then
-                addResult("  💰 " .. stat.Name .. " = " .. value .. " [MONEY: " .. keyword .. "]", Color3.fromRGB(255, 215, 0))
-            else
-                addResult("  📊 " .. stat.Name .. " = " .. value, Color3.fromRGB(100, 200, 255))
-            end
-            addResult("      Type: " .. stat.ClassName .. " | Path: " .. stat:GetFullName(), Color3.fromRGB(150, 150, 150))
-        end
-    else
-        addResult("❌ No leaderstats found", Color3.fromRGB(255, 100, 100))
-        addResult("💡 This game might use a different money system", Color3.fromRGB(200, 200, 200))
-    end
+local function StopGodMode()
+	if Humanoid then
+		-- Restore original health values
+		if OriginalMaxHealth then
+			Humanoid.MaxHealth = OriginalMaxHealth
+			Humanoid.Health = OriginalMaxHealth
+		else
+			Humanoid.MaxHealth = 100
+			Humanoid.Health = 100
+		end
+		
+		-- Disconnect all godmode connections
+		if HealthConnection then
+			HealthConnection:Disconnect()
+			HealthConnection = nil
+		end
+		
+		if TakeDamageConnection then
+			TakeDamageConnection:Disconnect()
+			TakeDamageConnection = nil
+		end
+		
+		if HeartbeatConnection then
+			HeartbeatConnection:Disconnect()
+			HeartbeatConnection = nil
+		end
+		
+		if StateConnection then
+			StateConnection:Disconnect()
+			StateConnection = nil
+		end
+		
+		-- Re-enable normal states
+		pcall(function()
+			Humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
+			Humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, true)
+		end)
+		
+		-- Remove fall protection
+		if HumanoidRootPart then
+			local fallProtection = HumanoidRootPart:FindFirstChild("FallProtection")
+			if fallProtection then
+				fallProtection:Destroy()
+			end
+		end
+		
+		GodMode = false
+		print("🩸 GodMode Deactivated - Health back to normal")
+	end
 end
 
--- Scan GUI Money Displays
-local function scanGUIMoney()
-    clearResults()
-    addResult("🖼️ Scanning GUI for money displays...", Color3.fromRGB(100, 200, 255))
-    
-    local found = 0
-    
-    for _, gui in pairs(Player.PlayerGui:GetDescendants()) do
-        if gui:IsA("TextLabel") then
-            local text = gui.Text
-            local isMoney, keyword = containsKeyword(text)
-            local hasNumber = string.match(text, "%d+")
-            
-            if isMoney and hasNumber then
-                found = found + 1
-                addResult("  💰 " .. gui.Name .. ": '" .. text .. "'", Color3.fromRGB(255, 215, 0))
-                addResult("      Keyword: " .. keyword .. " | Path: " .. gui:GetFullName(), Color3.fromRGB(150, 150, 150))
-            end
-        end
-    end
-    
-    addResult("✅ Found " .. found .. " money GUI elements", Color3.fromRGB(0, 255, 0))
-    
-    if found == 0 then
-        addResult("❌ No money displays found in GUI", Color3.fromRGB(255, 100, 100))
-        addResult("💡 Try looking after earning money", Color3.fromRGB(200, 200, 200))
-    end
+-- DIFFERENT FLY METHODS FOR VISIBILITY (unchanged)
+
+-- Method 1: BodyVelocity (Local only, smoothest)
+local function StartFlyingBodyVelocity()
+	if not BodyGyro then
+		BodyGyro = Instance.new("BodyGyro")
+		BodyGyro.P = 9e4
+		BodyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+		BodyGyro.CFrame = workspace.CurrentCamera.CFrame
+		BodyGyro.Parent = HumanoidRootPart
+	end
+	if not BodyVelocity then
+		BodyVelocity = Instance.new("BodyVelocity")
+		BodyVelocity.Velocity = Vector3.zero
+		BodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+		BodyVelocity.Parent = HumanoidRootPart
+	end
 end
 
--- Scan Values
-local function scanValues()
-    clearResults()
-    addResult("💎 Scanning for money-related Values...", Color3.fromRGB(255, 150, 0))
-    
-    local found = 0
-    
-    -- Scan player first
-    for _, obj in pairs(Player:GetDescendants()) do
-        if obj:IsA("IntValue") or obj:IsA("NumberValue") or obj:IsA("StringValue") then
-            local isMoney, keyword = containsKeyword(obj.Name)
-            
-            if isMoney then
-                found = found + 1
-                addResult("  💰 " .. obj.Name .. " = " .. tostring(obj.Value), Color3.fromRGB(255, 215, 0))
-                addResult("      Keyword: " .. keyword .. " | Path: " .. obj:GetFullName(), Color3.fromRGB(150, 150, 150))
-            end
-        end
-    end
-    
-    -- Scan workspace
-    for _, obj in pairs(workspace:GetDescendants()) do
-        if obj:IsA("IntValue") or obj:IsA("NumberValue") or obj:IsA("StringValue") then
-            local isMoney, keyword = containsKeyword(obj.Name)
-            
-            if isMoney then
-                found = found + 1
-                addResult("  💎 " .. obj.Name .. " = " .. tostring(obj.Value), Color3.fromRGB(100, 255, 100))
-                addResult("      Keyword: " .. keyword .. " | Path: " .. obj:GetFullName(), Color3.fromRGB(150, 150, 150))
-            end
-        end
-    end
-    
-    addResult("✅ Found " .. found .. " money values", Color3.fromRGB(0, 255, 0))
+-- Method 2: CFrame (More visible to others)
+local function StartFlyingCFrame()
+	-- Disable default physics
+	if Humanoid then
+		Humanoid.PlatformStand = true
+	end
 end
 
--- Scan Checkpoints
-local function scanCheckpoints()
-    clearResults()
-    addResult("🏁 Scanning for checkpoints and triggers...", Color3.fromRGB(255, 100, 255))
-    
-    local found = 0
-    
-    -- Look for parts with "checkpoint", "finish", "end", etc.
-    local checkpointKeywords = {"checkpoint", "check", "finish", "end", "goal", "trigger", "collect", "pickup"}
-    
-    for _, obj in pairs(workspace:GetDescendants()) do
-        if obj:IsA("BasePart") then
-            local name = string.lower(obj.Name)
-            
-            for _, keyword in ipairs(checkpointKeywords) do
-                if string.find(name, keyword) then
-                    found = found + 1
-                    addResult("  🏁 " .. obj.Name .. " | Position: " .. tostring(obj.Position), Color3.fromRGB(255, 100, 255))
-                    addResult("      Path: " .. obj:GetFullName(), Color3.fromRGB(150, 150, 150))
-                    
-                    -- Check if it has touch events or proximity prompts
-                    if obj:FindFirstChild("ProximityPrompt") then
-                        addResult("      💡 Has ProximityPrompt!", Color3.fromRGB(255, 255, 0))
-                    end
-                    
-                    break
-                end
-            end
-        end
-        
-        -- Look for ProximityPrompts specifically
-        if obj:IsA("ProximityPrompt") then
-            local isMoney, keyword = containsKeyword(obj.ObjectText)
-            
-            if isMoney or containsKeyword(obj.ActionText) then
-                found = found + 1
-                addResult("  🚪 ProximityPrompt: '" .. obj.ObjectText .. "'", Color3.fromRGB(255, 200, 0))
-                addResult("      Action: '" .. obj.ActionText .. "' | Path: " .. obj:GetFullName(), Color3.fromRGB(150, 150, 150))
-            end
-        end
-    end
-    
-    addResult("✅ Found " .. found .. " checkpoints/triggers", Color3.fromRGB(0, 255, 0))
-    
-    if found > 0 then
-        addResult("💡 These might give money when touched!", Color3.fromRGB(200, 200, 200))
-    end
+-- Method 3: Humanoid (Most compatible)
+local function StartFlyingHumanoid()
+	if Humanoid then
+		Humanoid.PlatformStand = true
+	end
+	if not BodyVelocity then
+		BodyVelocity = Instance.new("BodyVelocity")
+		BodyVelocity.Velocity = Vector3.zero
+		BodyVelocity.MaxForce = Vector3.new(4000, 4000, 4000)
+		BodyVelocity.Parent = HumanoidRootPart
+	end
 end
 
--- Button Events
-LeaderstatsButton.MouseButton1Click:Connect(scanLeaderstats)
-GUIButton.MouseButton1Click:Connect(scanGUIMoney)
-ValuesButton.MouseButton1Click:Connect(scanValues)
-CheckpointButton.MouseButton1Click:Connect(scanCheckpoints)
-ClearButton.MouseButton1Click:Connect(clearResults)
+local function StartFlying()
+	if NetworkMethod == "BodyVelocity" then
+		StartFlyingBodyVelocity()
+	elseif NetworkMethod == "CFrame" then
+		StartFlyingCFrame()
+	elseif NetworkMethod == "Humanoid" then
+		StartFlyingHumanoid()
+	end
+end
 
--- Close Button
-local CloseButton = Instance.new("TextButton")
-CloseButton.Size = UDim2.new(0, 20, 0, 20)
-CloseButton.Position = UDim2.new(1, -25, 0, 5)
-CloseButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
-CloseButton.Text = "X"
-CloseButton.TextColor3 = Color3.new(1, 1, 1)
-CloseButton.Font = Enum.Font.GothamBold
-CloseButton.TextSize = 12
-CloseButton.BorderSizePixel = 0
-CloseButton.Parent = Title
+local function StopFlying()
+	if BodyGyro then BodyGyro:Destroy(); BodyGyro = nil end
+	if BodyVelocity then BodyVelocity:Destroy(); BodyVelocity = nil end
+	if Humanoid then
+		Humanoid.PlatformStand = false
+	end
+end
 
-CloseButton.MouseButton1Click:Connect(function()
-    ScreenGui:Destroy()
-end)
+-- NOCLIP FUNCTIONS (unchanged)
+local function StartNoClip()
+	if Character then
+		for _, part in pairs(Character:GetChildren()) do
+			if part:IsA("BasePart") then
+				OriginalCanCollide[part] = part.CanCollide
+				part.CanCollide = false
+			end
+		end
+		NoClipping = true
+	end
+end
 
--- Toggle with hotkey
+local function StopNoClip()
+	if Character then
+		for _, part in pairs(Character:GetChildren()) do
+			if part:IsA("BasePart") and OriginalCanCollide[part] ~= nil then
+				part.CanCollide = OriginalCanCollide[part]
+			end
+		end
+		NoClipping = false
+		OriginalCanCollide = {}
+	end
+end
+
+local function MaintainNoClip()
+	if NoClipping and Character then
+		for _, part in pairs(Character:GetChildren()) do
+			if part:IsA("BasePart") then
+				part.CanCollide = false
+			end
+		end
+	end
+end
+
+-- TOGGLE GUI FUNCTION
+local function toggleGUI()
+	GuiVisible = not GuiVisible
+	if MainFrame then
+		MainFrame.Visible = GuiVisible
+	end
+end
+
+-- GUI BUILDER (Updated with Bring Players section)
+local function buildMainGUI()
+	if MainUI then MainUI:Destroy() end
+
+	MainUI = Instance.new("ScreenGui")
+	MainUI.Name = "FlyControlUI"
+	MainUI.Parent = CoreGui
+	MainUI.ResetOnSpawn = false
+
+	-- Main Frame (increased height for bring players section)
+	MainFrame = Instance.new("Frame")
+	MainFrame.Size = UDim2.new(0, 300, 0, 460)
+	MainFrame.Position = UDim2.new(0.02, 0, 0.15, 0)
+	MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+	MainFrame.BackgroundTransparency = 0.1
+	MainFrame.BorderSizePixel = 0
+	MainFrame.Parent = MainUI
+	
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = MainFrame
+
+	-- Title (Draggable)
+	local title = Instance.new("TextLabel")
+	title.Size = UDim2.new(1, 0, 0, 35)
+	title.Position = UDim2.new(0, 0, 0, 0)
+	title.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+	title.Text = "🚀 Enhanced Script + Bring Players [Drag Me]"
+	title.TextColor3 = Color3.new(1, 1, 1)
+	title.Font = Enum.Font.GothamBold
+	title.TextSize = 13
+	title.Parent = MainFrame
+	
+	local titleCorner = Instance.new("UICorner")
+	titleCorner.CornerRadius = UDim.new(0, 8)
+	titleCorner.Parent = title
+
+	-- Make GUI Draggable
+	local titleDragging = false
+	local dragStart = nil
+	local startPos = nil
+
+	title.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			titleDragging = true
+			dragStart = input.Position
+			startPos = MainFrame.Position
+		end
+	end)
+
+	title.InputChanged:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+			if titleDragging then
+				local delta = input.Position - dragStart
+				MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+			end
+		end
+	end)
+
+	title.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			titleDragging = false
+		end
+	end)
+
+	-- Hover effect for title
+	title.MouseEnter:Connect(function()
+		title.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+		title.Text = "🚀 Enhanced Script + Bring Players [Dragging...]"
+	end)
+
+	title.MouseLeave:Connect(function()
+		title.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+		title.Text = "🚀 Enhanced Script + Bring Players [Drag Me]"
+	end)
+
+	-- Method Selection
+	local methodSection = Instance.new("Frame")
+	methodSection.Size = UDim2.new(1, -10, 0, 60)
+	methodSection.Position = UDim2.new(0, 5, 0, 40)
+	methodSection.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+	methodSection.BackgroundTransparency = 0.3
+	methodSection.BorderSizePixel = 0
+	methodSection.Parent = MainFrame
+	
+	local methodCorner = Instance.new("UICorner")
+	methodCorner.CornerRadius = UDim.new(0, 6)
+	methodCorner.Parent = methodSection
+
+	local methodLabel = Instance.new("TextLabel")
+	methodLabel.Size = UDim2.new(1, 0, 0, 20)
+	methodLabel.Position = UDim2.new(0, 0, 0, 5)
+	methodLabel.BackgroundTransparency = 1
+	methodLabel.Text = "🌐 Network Method (Visibility)"
+	methodLabel.TextColor3 = Color3.new(1, 1, 1)
+	methodLabel.Font = Enum.Font.Gotham
+	methodLabel.TextSize = 11
+	methodLabel.Parent = methodSection
+
+	-- Method Buttons Container
+	local methodButtons = Instance.new("Frame")
+	methodButtons.Size = UDim2.new(1, -10, 0, 30)
+	methodButtons.Position = UDim2.new(0, 5, 0, 25)
+	methodButtons.BackgroundTransparency = 1
+	methodButtons.Parent = methodSection
+
+	local methodLayout = Instance.new("UIListLayout")
+	methodLayout.FillDirection = Enum.FillDirection.Horizontal
+	methodLayout.Padding = UDim.new(0, 3)
+	methodLayout.Parent = methodButtons
+
+	-- Method Selection Buttons
+	local methods = {
+		{name = "Body", method = "BodyVelocity", desc = "Smooth"},
+		{name = "CFrame", method = "CFrame", desc = "Visible"},
+		{name = "Humanoid", method = "Humanoid", desc = "Compatible"}
+	}
+
+	local methodBtns = {}
+	for i, methodData in ipairs(methods) do
+		local btn = Instance.new("TextButton")
+		btn.Size = UDim2.new(0.33, -2, 1, 0)
+		btn.BackgroundColor3 = methodData.method == NetworkMethod and Color3.fromRGB(0, 120, 255) or Color3.fromRGB(60, 60, 60)
+		btn.Text = methodData.name
+		btn.TextColor3 = Color3.new(1, 1, 1)
+		btn.Font = Enum.Font.Gotham
+		btn.TextSize = 10
+		btn.BorderSizePixel = 0
+		btn.Parent = methodButtons
+		
+		local btnCorner = Instance.new("UICorner")
+		btnCorner.CornerRadius = UDim.new(0, 4)
+		btnCorner.Parent = btn
+
+		methodBtns[methodData.method] = btn
+
+		btn.MouseButton1Click:Connect(function()
+			-- Update selection
+			for method, button in pairs(methodBtns) do
+				button.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+			end
+			btn.BackgroundColor3 = Color3.fromRGB(0, 120, 255)
+			NetworkMethod = methodData.method
+			
+			-- Restart flying if active
+			if Flying then
+				StopFlying()
+				StartFlying()
+			end
+		end)
+	end
+
+	-- Speed Control Section
+	local speedSection = Instance.new("Frame")
+	speedSection.Size = UDim2.new(1, -10, 0, 80)
+	speedSection.Position = UDim2.new(0, 5, 0, 105)
+	speedSection.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+	speedSection.BackgroundTransparency = 0.3
+	speedSection.BorderSizePixel = 0
+	speedSection.Parent = MainFrame
+	
+	local speedCorner = Instance.new("UICorner")
+	speedCorner.CornerRadius = UDim.new(0, 6)
+	speedCorner.Parent = speedSection
+
+	-- Speed Label
+	local speedLabel = Instance.new("TextLabel")
+	speedLabel.Size = UDim2.new(1, 0, 0, 25)
+	speedLabel.Position = UDim2.new(0, 0, 0, 5)
+	speedLabel.BackgroundTransparency = 1
+	speedLabel.Text = "✈️ Speed: " .. Speed
+	speedLabel.TextColor3 = Color3.new(1, 1, 1)
+	speedLabel.Font = Enum.Font.Gotham
+	speedLabel.TextSize = 12
+	speedLabel.Parent = speedSection
+
+	-- Speed Slider Background
+	local sliderBg = Instance.new("Frame")
+	sliderBg.Size = UDim2.new(1, -20, 0, 20)
+	sliderBg.Position = UDim2.new(0, 10, 0, 30)
+	sliderBg.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+	sliderBg.BorderSizePixel = 0
+	sliderBg.Parent = speedSection
+	
+	local sliderBgCorner = Instance.new("UICorner")
+	sliderBgCorner.CornerRadius = UDim.new(0, 10)
+	sliderBgCorner.Parent = sliderBg
+
+	-- Speed Slider
+	local slider = Instance.new("Frame")
+	slider.Size = UDim2.new(Speed/100, 0, 1, 0)
+	slider.Position = UDim2.new(0, 0, 0, 0)
+	slider.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
+	slider.BorderSizePixel = 0
+	slider.Parent = sliderBg
+	
+	local sliderCorner = Instance.new("UICorner")
+	sliderCorner.CornerRadius = UDim.new(0, 10)
+	sliderCorner.Parent = slider
+
+	-- Speed Slider Button
+	local sliderButton = Instance.new("TextButton")
+	sliderButton.Size = UDim2.new(0, 20, 0, 20)
+	sliderButton.Position = UDim2.new(Speed/100, -10, 0, 0)
+	sliderButton.BackgroundColor3 = Color3.new(1, 1, 1)
+	sliderButton.Text = ""
+	sliderButton.BorderSizePixel = 0
+	sliderButton.Parent = sliderBg
+	
+	local buttonCorner = Instance.new("UICorner")
+	buttonCorner.CornerRadius = UDim.new(1, 0)
+	buttonCorner.Parent = sliderButton
+
+	-- Speed Values
+	local minLabel = Instance.new("TextLabel")
+	minLabel.Size = UDim2.new(0, 20, 0, 15)
+	minLabel.Position = UDim2.new(0, 10, 0, 55)
+	minLabel.BackgroundTransparency = 1
+	minLabel.Text = "1"
+	minLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+	minLabel.Font = Enum.Font.Gotham
+	minLabel.TextSize = 10
+	minLabel.Parent = speedSection
+
+	local maxLabel = Instance.new("TextLabel")
+	maxLabel.Size = UDim2.new(0, 30, 0, 15)
+	maxLabel.Position = UDim2.new(1, -40, 0, 55)
+	maxLabel.BackgroundTransparency = 1
+	maxLabel.Text = "100"
+	maxLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+	maxLabel.Font = Enum.Font.Gotham
+	maxLabel.TextSize = 10
+	maxLabel.Parent = speedSection
+
+	-- BRING PLAYERS CONTROL SECTION (NEW!)
+	local bringSection = Instance.new("Frame")
+	bringSection.Size = UDim2.new(1, -10, 0, 100)
+	bringSection.Position = UDim2.new(0, 5, 0, 190)
+	bringSection.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+	bringSection.BackgroundTransparency = 0.3
+	bringSection.BorderSizePixel = 0
+	bringSection.Parent = MainFrame
+	
+	local bringCorner = Instance.new("UICorner")
+	bringCorner.CornerRadius = UDim.new(0, 6)
+	bringCorner.Parent = bringSection
+
+	-- Bring Section Title
+	local bringTitle = Instance.new("TextLabel")
+	bringTitle.Size = UDim2.new(1, 0, 0, 20)
+	bringTitle.Position = UDim2.new(0, 0, 0, 5)
+	bringTitle.BackgroundTransparency = 1
+	bringTitle.Text = "🌀 Bring Players (Server-Side)"
+	bringTitle.TextColor3 = Color3.new(1, 1, 1)
+	bringTitle.Font = Enum.Font.GothamBold
+	bringTitle.TextSize = 11
+	bringTitle.Parent = bringSection
+
+	-- Bring All Button
+	local bringAllButton = Instance.new("TextButton")
+	bringAllButton.Size = UDim2.new(0.48, 0, 0, 30)
+	bringAllButton.Position = UDim2.new(0, 10, 0, 25)
+	bringAllButton.BackgroundColor3 = Color3.fromRGB(255, 100, 100)
+	bringAllButton.Text = "🌀 Bring ALL"
+	bringAllButton.TextColor3 = Color3.new(1, 1, 1)
+	bringAllButton.Font = Enum.Font.GothamBold
+	bringAllButton.TextSize = 11
+	bringAllButton.BorderSizePixel = 0
+	bringAllButton.Parent = bringSection
+	
+	local bringAllCorner = Instance.new("UICorner")
+	bringAllCorner.CornerRadius = UDim.new(0, 5)
+	bringAllCorner.Parent = bringAllButton
+
+	-- Player Name Input
+	local playerInput = Instance.new("TextBox")
+	playerInput.Size = UDim2.new(0.48, 0, 0, 30)
+	playerInput.Position = UDim2.new(0.52, 0, 0, 25)
+	playerInput.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+	playerInput.Text = "Player Name"
+	playerInput.TextColor3 = Color3.new(1, 1, 1)
+	playerInput.Font = Enum.Font.Gotham
+	playerInput.TextSize = 10
+	playerInput.BorderSizePixel = 0
+	playerInput.Parent = bringSection
+	
+	local inputCorner = Instance.new("UICorner")
+	inputCorner.CornerRadius = UDim.new(0, 5)
+	inputCorner.Parent = playerInput
+
+	-- Bring Specific Button
+	local bringSpecificButton = Instance.new("TextButton")
+	bringSpecificButton.Size = UDim2.new(1, -20, 0, 25)
+	bringSpecificButton.Position = UDim2.new(0, 10, 0, 60)
+	bringSpecificButton.BackgroundColor3 = Color3.fromRGB(100, 150, 255)
+	bringSpecificButton.Text = "🎯 Bring Specific Player"
+	bringSpecificButton.TextColor3 = Color3.new(1, 1, 1)
+	bringSpecificButton.Font = Enum.Font.Gotham
+	bringSpecificButton.TextSize = 10
+	bringSpecificButton.BorderSizePixel = 0
+	bringSpecificButton.Parent = bringSection
+	
+	local bringSpecificCorner = Instance.new("UICorner")
+	bringSpecificCorner.CornerRadius = UDim.new(0, 5)
+	bringSpecificCorner.Parent = bringSpecificButton
+
+	-- Status Label
+	local bringStatus = Instance.new("TextLabel")
+	bringStatus.Size = UDim2.new(1, 0, 0, 15)
+	bringStatus.Position = UDim2.new(0, 0, 0, 85)
+	bringStatus.BackgroundTransparency = 1
+	bringStatus.Text = "⚠️ Use with caution - High detection risk!"
+	bringStatus.TextColor3 = Color3.fromRGB(255, 200, 100)
+	bringStatus.Font = Enum.Font.Gotham
+	bringStatus.TextSize = 9
+	bringStatus.Parent = bringSection
+
+	-- NoClip Control Section
+	local noclipSection = Instance.new("Frame")
+	noclipSection.Size = UDim2.new(1, -10, 0, 70)
+	noclipSection.Position = UDim2.new(0, 5, 0, 295)
+	noclipSection.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+	noclipSection.BackgroundTransparency = 0.3
+	noclipSection.BorderSizePixel = 0
+	noclipSection.Parent = MainFrame
+	
+	local noclipCorner = Instance.new("UICorner")
+	noclipCorner.CornerRadius = UDim.new(0, 6)
+	noclipCorner.Parent = noclipSection
+
+	-- NoClip Toggle Button
+	local noclipButton = Instance.new("TextButton")
+	noclipButton.Size = UDim2.new(1, -20, 0, 35)
+	noclipButton.Position = UDim2.new(0, 10, 0, 10)
+	noclipButton.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+	noclipButton.Text = "🚫 NoClip: OFF"
+	noclipButton.TextColor3 = Color3.new(1, 1, 1)
+	noclipButton.Font = Enum.Font.GothamBold
+	noclipButton.TextSize = 12
+	noclipButton.BorderSizePixel = 0
+	noclipButton.Parent = noclipSection
+	
+	local noclipBtnCorner = Instance.new("UICorner")
+	noclipBtnCorner.CornerRadius = UDim.new(0, 6)
+	noclipBtnCorner.Parent = noclipButton
+
+	-- NoClip Status Label
+	local noclipStatus = Instance.new("TextLabel")
+	noclipStatus.Size = UDim2.new(1, 0, 0, 20)
+	noclipStatus.Position = UDim2.new(0, 0, 0, 45)
+	noclipStatus.BackgroundTransparency = 1
+	noclipStatus.Text = "Press N or click button to toggle"
+	noclipStatus.TextColor3 = Color3.fromRGB(150, 150, 150)
+	noclipStatus.Font = Enum.Font.Gotham
+	noclipStatus.TextSize = 10
+	noclipStatus.Parent = noclipSection
+
+	-- GODMODE CONTROL SECTION
+	local godmodeSection = Instance.new("Frame")
+	godmodeSection.Size = UDim2.new(1, -10, 0, 70)
+	godmodeSection.Position = UDim2.new(0, 5, 0, 370)
+	godmodeSection.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+	godmodeSection.BackgroundTransparency = 0.3
+	godmodeSection.BorderSizePixel = 0
+	godmodeSection.Parent = MainFrame
+	
+	local godmodeCorner = Instance.new("UICorner")
+	godmodeCorner.CornerRadius = UDim.new(0, 6)
+	godmodeCorner.Parent = godmodeSection
+
+	-- GodMode Toggle Button
+	local godmodeButton = Instance.new("TextButton")
+	godmodeButton.Size = UDim2.new(1, -20, 0, 35)
+	godmodeButton.Position = UDim2.new(0, 10, 0, 10)
+	godmodeButton.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+	godmodeButton.Text = "🛡️ GodMode: OFF"
+	godmodeButton.TextColor3 = Color3.new(1, 1, 1)
+	godmodeButton.Font = Enum.Font.GothamBold
+	godmodeButton.TextSize = 12
+	godmodeButton.BorderSizePixel = 0
+	godmodeButton.Parent = godmodeSection
+	
+	local godmodeBtnCorner = Instance.new("UICorner")
+	godmodeBtnCorner.CornerRadius = UDim.new(0, 6)
+	godmodeBtnCorner.Parent = godmodeButton
+
+	-- GodMode Status Label
+	local godmodeStatus = Instance.new("TextLabel")
+	godmodeStatus.Size = UDim2.new(1, 0, 0, 20)
+	godmodeStatus.Position = UDim2.new(0, 0, 0, 45)
+	godmodeStatus.BackgroundTransparency = 1
+	godmodeStatus.Text = "Press H or click button to toggle"
+	godmodeStatus.TextColor3 = Color3.fromRGB(150, 150, 150)
+	godmodeStatus.Font = Enum.Font.Gotham
+	godmodeStatus.TextSize = 10
+	godmodeStatus.Parent = godmodeSection
+
+	-- Slider Logic
+	local sliderDragging = false
+	sliderButton.MouseButton1Down:Connect(function()
+		sliderDragging = true
+	end)
+
+	UserInputService.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			sliderDragging = false
+		end
+	end)
+
+	UserInputService.InputChanged:Connect(function(input)
+		if sliderDragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+			local mouse = Players.LocalPlayer:GetMouse()
+			local relativeX = mouse.X - sliderBg.AbsolutePosition.X
+			local percentage = math.clamp(relativeX / sliderBg.AbsoluteSize.X, 0, 1)
+			
+			Speed = math.floor(percentage * 99) + 1
+			if Speed > 100 then Speed = 100 end
+			if Speed < 1 then Speed = 1 end
+			
+			slider.Size = UDim2.new(percentage, 0, 1, 0)
+			sliderButton.Position = UDim2.new(percentage, -10, 0, 0)
+			speedLabel.Text = "✈️ Speed: " .. Speed
+		end
+	end)
+
+	-- Bring Players Button Logic (NEW!)
+	bringAllButton.MouseButton1Click:Connect(function()
+		bringAllButton.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
+		bringAllButton.Text = "🌀 Bringing..."
+		bringStatus.Text = "⏳ Bringing all players to you..."
+		bringStatus.TextColor3 = Color3.fromRGB(255, 255, 100)
+		
+		BringAllPlayers()
+		
+		wait(2)
+		bringAllButton.BackgroundColor3 = Color3.fromRGB(255, 100, 100)
+		bringAllButton.Text = "🌀 Bring ALL"
+		bringStatus.Text = "✅ Bring completed! Check console for details"
+		bringStatus.TextColor3 = Color3.fromRGB(100, 255, 100)
+		
+		wait(3)
+		bringStatus.Text = "⚠️ Use with caution - High detection risk!"
+		bringStatus.TextColor3 = Color3.fromRGB(255, 200, 100)
+	end)
+
+	bringSpecificButton.MouseButton1Click:Connect(function()
+		local targetName = playerInput.Text
+		if targetName and targetName ~= "Player Name" and targetName ~= "" then
+			bringSpecificButton.BackgroundColor3 = Color3.fromRGB(50, 100, 200)
+			bringSpecificButton.Text = "🎯 Bringing..."
+			bringStatus.Text = "⏳ Bringing " .. targetName .. "..."
+			bringStatus.TextColor3 = Color3.fromRGB(255, 255, 100)
+			
+			local success = BringSpecificPlayer(targetName)
+			
+			wait(1)
+			bringSpecificButton.BackgroundColor3 = Color3.fromRGB(100, 150, 255)
+			bringSpecificButton.Text = "🎯 Bring Specific Player"
+			
+			if success then
+				bringStatus.Text = "✅ Successfully brought " .. targetName .. "!"
+				bringStatus.TextColor3 = Color3.fromRGB(100, 255, 100)
+			else
+				bringStatus.Text = "❌ Failed to bring " .. targetName
+				bringStatus.TextColor3 = Color3.fromRGB(255, 100, 100)
+			end
+			
+			wait(3)
+			bringStatus.Text = "⚠️ Use with caution - High detection risk!"
+			bringStatus.TextColor3 = Color3.fromRGB(255, 200, 100)
+		else
+			bringStatus.Text = "❌ Please enter a valid player name!"
+			bringStatus.TextColor3 = Color3.fromRGB(255, 100, 100)
+			wait(2)
+			bringStatus.Text = "⚠️ Use with caution - High detection risk!"
+			bringStatus.TextColor3 = Color3.fromRGB(255, 200, 100)
+		end
+	end)
+
+	-- Clear placeholder text when clicked
+	playerInput.Focused:Connect(function()
+		if playerInput.Text == "Player Name" then
+			playerInput.Text = ""
+		end
+	end)
+
+	playerInput.FocusLost:Connect(function()
+		if playerInput.Text == "" then
+			playerInput.Text = "Player Name"
+		end
+	end)
+
+	-- NoClip Button Logic
+	noclipButton.MouseButton1Click:Connect(function()
+		NoClipping = not NoClipping
+		if NoClipping then
+			StartNoClip()
+			noclipButton.BackgroundColor3 = Color3.fromRGB(0, 150, 50)
+			noclipButton.Text = "✅ NoClip: ON"
+			noclipStatus.Text = "Walking through walls enabled"
+			noclipStatus.TextColor3 = Color3.fromRGB(0, 255, 100)
+		else
+			StopNoClip()
+			noclipButton.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+			noclipButton.Text = "🚫 NoClip: OFF"
+			noclipStatus.Text = "Press N or click button to toggle"
+			noclipStatus.TextColor3 = Color3.fromRGB(150, 150, 150)
+		end
+	end)
+
+	-- GodMode Button Logic
+	godmodeButton.MouseButton1Click:Connect(function()
+		GodMode = not GodMode
+		if GodMode then
+			StartGodMode()
+			godmodeButton.BackgroundColor3 = Color3.fromRGB(255, 215, 0)
+			godmodeButton.Text = "⚡ GodMode: ON"
+			godmodeStatus.Text = "Kebal damage - Health unlimited!"
+			godmodeStatus.TextColor3 = Color3.fromRGB(255, 255, 0)
+		else
+			StopGodMode()
+			godmodeButton.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+			godmodeButton.Text = "🛡️ GodMode: OFF"
+			godmodeStatus.Text = "Press H or click button to toggle"
+			godmodeStatus.TextColor3 = Color3.fromRGB(150, 150, 150)
+		end
+	end)
+end
+
+-- INPUT CONTROL (Updated with T and Y keys for Bring functions)
 UserInputService.InputBegan:Connect(function(input, gpe)
-    if gpe then return end
-    if input.KeyCode == Enum.KeyCode.Insert then
-        if ScreenGui.Parent then
-            ScreenGui:Destroy()
-        end
-    end
+	if gpe then return end
+	if input.KeyCode == Enum.KeyCode.F then
+		Flying = not Flying
+		if Flying then StartFlying() else StopFlying() end
+	elseif input.KeyCode == Enum.KeyCode.N then
+		NoClipping = not NoClipping
+		if NoClipping then StartNoClip() else StopNoClip() end
+	elseif input.KeyCode == Enum.KeyCode.H then
+		GodMode = not GodMode
+		if GodMode then StartGodMode() else StopGodMode() end
+	elseif input.KeyCode == Enum.KeyCode.T then
+		-- Bring All Players hotkey
+		print("🌀 Hotkey activated: Bringing all players...")
+		BringAllPlayers()
+	elseif input.KeyCode == Enum.KeyCode.G then
+		toggleGUI()
+	end
 end)
 
--- Make draggable
-local dragging = false
-local dragStart = nil
-local startPos = nil
+-- FLY MOTION
+RunService.RenderStepped:Connect(function()
+	if Flying then
+		local cam = workspace.CurrentCamera
+		local moveVec = Vector3.zero
+		
+		-- Get movement input
+		if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveVec += cam.CFrame.LookVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveVec -= cam.CFrame.LookVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveVec -= cam.CFrame.RightVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveVec += cam.CFrame.RightVector end
+		if UserInputService:IsKeyDown(Enum.KeyCode.Space) then moveVec += Vector3.new(0, 1, 0) end
+		if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then moveVec -= Vector3.new(0, 1, 0) end
 
-Title.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging = true
-        dragStart = input.Position
-        startPos = Frame.Position
-    end
+		-- Apply movement based on method
+		if NetworkMethod == "BodyVelocity" then
+			if BodyVelocity and BodyGyro then
+				BodyVelocity.Velocity = moveVec.Magnitude > 0 and moveVec.Unit * Speed or Vector3.zero
+				BodyGyro.CFrame = cam.CFrame
+			end
+		elseif NetworkMethod == "CFrame" then
+			if moveVec.Magnitude > 0 then
+				local deltaTime = RunService.RenderStepped:Wait()
+				local newPos = HumanoidRootPart.Position + (moveVec.Unit * Speed * deltaTime)
+				HumanoidRootPart.CFrame = CFrame.new(newPos, newPos + cam.CFrame.LookVector)
+			end
+		elseif NetworkMethod == "Humanoid" then
+			if BodyVelocity then
+				BodyVelocity.Velocity = moveVec.Magnitude > 0 and moveVec.Unit * Speed or Vector3.zero
+			end
+			if moveVec.Magnitude > 0 then
+				HumanoidRootPart.CFrame = CFrame.new(HumanoidRootPart.Position, HumanoidRootPart.Position + cam.CFrame.LookVector)
+			end
+		end
+	end
+	
+	-- Maintain noclip
+	MaintainNoClip()
 end)
 
-Title.InputChanged:Connect(function(input)
-    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-        local delta = input.Position - dragStart
-        Frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-    end
+-- Handle character respawn
+Player.CharacterAdded:Connect(function(newCharacter)
+	Character = newCharacter
+	Humanoid = Character:WaitForChild("Humanoid")
+	HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
+	Flying = false
+	NoClipping = false
+	GodMode = false
+	OriginalCanCollide = {}
+	OriginalMaxHealth = nil
+	
+	-- Clean up connections
+	if HealthConnection then HealthConnection:Disconnect(); HealthConnection = nil end
+	if TakeDamageConnection then TakeDamageConnection:Disconnect(); TakeDamageConnection = nil end
+	if HeartbeatConnection then HeartbeatConnection:Disconnect(); HeartbeatConnection = nil end
+	if StateConnection then StateConnection:Disconnect(); StateConnection = nil end
+	
+	StopFlying()
+	StopNoClip()
+	StopGodMode()
 end)
 
-Title.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging = false
-    end
-end)
+-- INIT GUI
+buildMainGUI()
 
--- Initial scan
-addResult("💰 Money Scanner loaded! Click buttons to scan:", Color3.fromRGB(100, 255, 255))
-addResult("👑 Leaderstats - Player money/stats", Color3.fromRGB(200, 200, 200))
-addResult("🖼️ GUI Money - Money displays on screen", Color3.fromRGB(200, 200, 200))
-addResult("💎 Values - Hidden money values", Color3.fromRGB(200, 200, 200))
-addResult("🏁 Checkpoints - Money-giving triggers", Color3.fromRGB(200, 200, 200))
-
-print("Money & Notification Scanner loaded!")
-print("This will help find where money is stored!")
-print("Try each scan type to find the money system")
+print("Enhanced Fly, NoClip, GodMode & Bring Players Script Loaded!")
+print("Controls:")
+print("F - Toggle Fly")
+print("N - Toggle NoClip") 
+print("H - Toggle GodMode")
+print("T - Bring All Players (NEW!)")
+print("G - Toggle GUI (Show/Hide)")
+print("WASD - Movement, Space - Up, Ctrl - Down")
+print("Drag title bar to move GUI")
+print("Try different network methods for visibility:")
+print("- Body: Smoothest (client-side)")
+print("- CFrame: More visible to others") 
+print("- Humanoid: Most compatible")
+print("🛡️ GodMode: Makes you invincible to all damage!")
+print("🌀 Bring Players: Teleports all players to your location (HIGH RISK!)")
